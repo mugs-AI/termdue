@@ -5,19 +5,45 @@ export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
       { title: "Overdue Invoices Dashboard" },
-      { name: "description", content: "Read-only overdue sales invoices dashboard powered by QNE." },
+      { name: "description", content: "Read-only overdue sales invoices dashboard powered by N3." },
     ],
   }),
   component: SignInPage,
 });
+
+const GUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 function SignInPage() {
   const navigate = useNavigate();
   const [apiKey, setApiKey] = useState("");
   const [error, setError] = useState<string | null>(null);
 
+  // Auto-launch flow: when N3 hands off to this app, it appends the API key
+  // to the launch URL (e.g. ?api-key=... or ?apiKey=...). We capture it,
+  // stash it in sessionStorage, and jump straight to the dashboard so the
+  // user never sees this sign-in screen.
   useEffect(() => {
-    if (typeof window !== "undefined" && sessionStorage.getItem("qne_api_key")) {
+    if (typeof window === "undefined") return;
+
+    const url = new URL(window.location.href);
+    const fromUrl =
+      url.searchParams.get("api-key") ||
+      url.searchParams.get("apiKey") ||
+      url.searchParams.get("apikey") ||
+      "";
+
+    if (fromUrl && GUID.test(fromUrl.trim())) {
+      sessionStorage.setItem("qne_api_key", fromUrl.trim());
+      // Strip the key from the address bar so it isn't shoulder-surfed or logged.
+      url.searchParams.delete("api-key");
+      url.searchParams.delete("apiKey");
+      url.searchParams.delete("apikey");
+      window.history.replaceState({}, "", url.pathname + url.search);
+      navigate({ to: "/dashboard" });
+      return;
+    }
+
+    if (sessionStorage.getItem("qne_api_key")) {
       navigate({ to: "/dashboard" });
     }
   }, [navigate]);
@@ -25,9 +51,8 @@ function SignInPage() {
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     const trimmed = apiKey.trim();
-    const guid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
-    if (!guid.test(trimmed)) {
-      setError("That doesn't look like a QNE API key. It should be a GUID.");
+    if (!GUID.test(trimmed)) {
+      setError("That doesn't look like an N3 API key. It should be a GUID.");
       return;
     }
     sessionStorage.setItem("qne_api_key", trimmed);
@@ -42,8 +67,9 @@ function SignInPage() {
             Overdue Invoices
           </h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Sign in with your QNE API key. Your key is held only in this browser tab and is
-            sent to QNE on every refresh — QNE enforces which companies and invoices you see.
+            Launch this app from N3 — your API key is passed automatically and
+            N3 enforces which companies and invoices you can see. You can also
+            paste a key manually below.
           </p>
         </div>
         <form
@@ -52,7 +78,7 @@ function SignInPage() {
         >
           <div className="space-y-2">
             <label htmlFor="key" className="text-sm font-medium text-foreground">
-              QNE API key
+              N3 API key
             </label>
             <input
               id="key"
@@ -68,7 +94,7 @@ function SignInPage() {
               className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
             />
             <p className="text-xs text-muted-foreground">
-              Find it in QNE → Marketplace → My Apps → your app.
+              In production, N3 launches this app with <code>?api-key=…</code> appended to the URL.
             </p>
           </div>
           {error && (
