@@ -208,10 +208,11 @@ function DashboardPage() {
   const top20 = useMemo(() => customerGroups.slice(0, 20), [customerGroups]);
 
   function refresh() {
-    if (apiKey) mutation.mutate({ apiKey, fromDate, toDate, salesperson, termCode });
+    if (token) mutation.mutate({ fromDate, toDate, salesperson, termCode });
   }
   function signOut() {
     sessionStorage.removeItem("qne_api_key");
+    sessionStorage.removeItem("qne_jwt");
     navigate({ to: "/" });
   }
 
