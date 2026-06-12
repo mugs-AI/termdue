@@ -127,36 +127,57 @@ function DashboardPage() {
     }) => insightsFn({ data: vars }) as Promise<{ tips: string[] }>,
   });
 
-  // Bootstrap: prefer an existing JWT in this session. Otherwise look for an
-  // API key (in the URL from N3, or in sessionStorage from the dev sign-in
-  // form), exchange it once for a JWT, and discard the key.
+  // Bootstrap: accept a JWT directly from N3 (`?token=...`), fall back to an
+  // API key in the URL or sessionStorage (which we exchange once for a JWT),
+  // then use the JWT for every subsequent call.
   useEffect(() => {
     if (typeof window === "undefined") return;
     let cancelled = false;
 
+    const url = new URL(window.location.href);
+    const jwtRe = /^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
+
+    // 1. JWT in the URL — preferred handoff from N3.
+    const jwtFromUrl = (
+      url.searchParams.get("token") ||
+      url.searchParams.get("access_token") ||
+      url.searchParams.get("jwt") ||
+      ""
+    ).trim();
+    if (jwtFromUrl && jwtRe.test(jwtFromUrl)) {
+      sessionStorage.setItem("qne_jwt", jwtFromUrl);
+      sessionStorage.removeItem("qne_api_key");
+      url.searchParams.delete("token");
+      url.searchParams.delete("access_token");
+      url.searchParams.delete("jwt");
+      window.history.replaceState({}, "", url.pathname + url.search);
+      setToken(jwtFromUrl);
+      return;
+    }
+
+    // 2. JWT already in this session.
     const existingJwt = sessionStorage.getItem("qne_jwt");
     if (existingJwt) {
       setToken(existingJwt);
       return;
     }
 
+    // 3. API key — exchange once for a JWT, then discard the key.
     const guid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
-    const url = new URL(window.location.href);
-    const fromUrl =
+    const keyFromUrl =
       url.searchParams.get("api-key") ||
       url.searchParams.get("apiKey") ||
       url.searchParams.get("apikey") ||
       "";
     const fromStorage = sessionStorage.getItem("qne_api_key") ?? "";
-    const apiKey = (fromUrl || fromStorage).trim();
+    const apiKey = (keyFromUrl || fromStorage).trim();
 
     if (!apiKey || !guid.test(apiKey)) {
       navigate({ to: "/" });
       return;
     }
 
-    // Strip the key from the address bar before doing anything else.
-    if (fromUrl) {
+    if (keyFromUrl) {
       url.searchParams.delete("api-key");
       url.searchParams.delete("apiKey");
       url.searchParams.delete("apikey");
@@ -168,7 +189,7 @@ function DashboardPage() {
         const { token: jwt } = (await exchangeFn({ data: { apiKey } })) as { token: string };
         if (cancelled) return;
         sessionStorage.setItem("qne_jwt", jwt);
-        sessionStorage.removeItem("qne_api_key"); // discard the raw key per QNE guidance
+        sessionStorage.removeItem("qne_api_key");
         setToken(jwt);
       } catch (e) {
         if (cancelled) return;
