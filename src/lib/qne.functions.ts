@@ -4,12 +4,27 @@ import { z } from "zod";
 const QNE_BASE = "https://openapi.account.qne.cloud";
 
 const InputSchema = z.object({
-  apiKey: z.string().uuid({ message: "QNE API key must be a valid GUID" }),
+  token: z.string().min(20, { message: "Missing QNE session token" }),
   fromDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   toDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   salesperson: z.string().optional().default(""),
   termCode: z.string().optional().default(""),
 });
+
+const ExchangeSchema = z.object({
+  apiKey: z.string().uuid({ message: "QNE API key must be a valid GUID" }),
+});
+
+const RefreshSchema = z.object({
+  token: z.string().min(20),
+});
+
+export class QneUnauthorizedError extends Error {
+  constructor(message = "QNE session expired") {
+    super(message);
+    this.name = "QneUnauthorizedError";
+  }
+}
 
 export type OverdueInvoice = {
   id: string;
