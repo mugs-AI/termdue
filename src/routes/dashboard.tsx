@@ -14,6 +14,8 @@ import {
 import {
   fetchOverdueInvoices,
   getAiInsights,
+  exchangeApiKey,
+  refreshSession,
   type OverdueInvoice,
   type OverdueResult,
 } from "@/lib/qne.functions";
@@ -70,22 +72,46 @@ function DashboardPage() {
   const navigate = useNavigate();
   const fetchFn = useServerFn(fetchOverdueInvoices);
   const insightsFn = useServerFn(getAiInsights);
+  const exchangeFn = useServerFn(exchangeApiKey);
+  const refreshFn = useServerFn(refreshSession);
 
-  const [apiKey, setApiKey] = useState<string | null>(null);
+  const [token, setToken] = useState<string | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
   const [fromDate, setFromDate] = useState(monthsAgoISO(12));
   const [toDate, setToDate] = useState(todayISO());
   const [salesperson, setSalesperson] = useState("");
   const [termCode, setTermCode] = useState("");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
+  // Run a fetch with one transparent JWT refresh on 401.
+  async function fetchWithRefresh(vars: {
+    fromDate: string;
+    toDate: string;
+    salesperson: string;
+    termCode: string;
+  }): Promise<OverdueResult> {
+    const current = token ?? sessionStorage.getItem("qne_jwt");
+    if (!current) throw new Error("Not signed in");
+    try {
+      return (await fetchFn({ data: { ...vars, token: current } })) as OverdueResult;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!/QneUnauthorized|session expired|401/i.test(msg)) throw e;
+      // Refresh once, retry once.
+      const { token: fresh } = (await refreshFn({ data: { token: current } })) as { token: string };
+      sessionStorage.setItem("qne_jwt", fresh);
+      setToken(fresh);
+      return (await fetchFn({ data: { ...vars, token: fresh } })) as OverdueResult;
+    }
+  }
+
   const mutation = useMutation({
     mutationFn: (vars: {
-      apiKey: string;
       fromDate: string;
       toDate: string;
       salesperson: string;
       termCode: string;
-    }) => fetchFn({ data: vars }) as Promise<OverdueResult>,
+    }) => fetchWithRefresh(vars),
   });
 
   const insights = useMutation({
@@ -101,8 +127,19 @@ function DashboardPage() {
     }) => insightsFn({ data: vars }) as Promise<{ tips: string[] }>,
   });
 
+  // Bootstrap: prefer an existing JWT in this session. Otherwise look for an
+  // API key (in the URL from N3, or in sessionStorage from the dev sign-in
+  // form), exchange it once for a JWT, and discard the key.
   useEffect(() => {
     if (typeof window === "undefined") return;
+    let cancelled = false;
+
+    const existingJwt = sessionStorage.getItem("qne_jwt");
+    if (existingJwt) {
+      setToken(existingJwt);
+      return;
+    }
+
     const guid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
     const url = new URL(window.location.href);
     const fromUrl =
@@ -110,28 +147,47 @@ function DashboardPage() {
       url.searchParams.get("apiKey") ||
       url.searchParams.get("apikey") ||
       "";
-    if (fromUrl && guid.test(fromUrl.trim())) {
-      sessionStorage.setItem("qne_api_key", fromUrl.trim());
+    const fromStorage = sessionStorage.getItem("qne_api_key") ?? "";
+    const apiKey = (fromUrl || fromStorage).trim();
+
+    if (!apiKey || !guid.test(apiKey)) {
+      navigate({ to: "/" });
+      return;
+    }
+
+    // Strip the key from the address bar before doing anything else.
+    if (fromUrl) {
       url.searchParams.delete("api-key");
       url.searchParams.delete("apiKey");
       url.searchParams.delete("apikey");
       window.history.replaceState({}, "", url.pathname + url.search);
-      setApiKey(fromUrl.trim());
-      return;
     }
-    const k = sessionStorage.getItem("qne_api_key");
-    if (!k) {
-      navigate({ to: "/" });
-      return;
-    }
-    setApiKey(k);
-  }, [navigate]);
+
+    (async () => {
+      try {
+        const { token: jwt } = (await exchangeFn({ data: { apiKey } })) as { token: string };
+        if (cancelled) return;
+        sessionStorage.setItem("qne_jwt", jwt);
+        sessionStorage.removeItem("qne_api_key"); // discard the raw key per QNE guidance
+        setToken(jwt);
+      } catch (e) {
+        if (cancelled) return;
+        setAuthError(e instanceof Error ? e.message : "Failed to authenticate with N3.");
+        sessionStorage.removeItem("qne_api_key");
+        sessionStorage.removeItem("qne_jwt");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [exchangeFn, navigate]);
 
   useEffect(() => {
-    if (!apiKey) return;
-    mutation.mutate({ apiKey, fromDate, toDate, salesperson, termCode });
+    if (!token) return;
+    mutation.mutate({ fromDate, toDate, salesperson, termCode });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [apiKey, fromDate, toDate, salesperson, termCode]);
+  }, [token, fromDate, toDate, salesperson, termCode]);
 
   const data = mutation.data;
   const loading = mutation.isPending;
@@ -152,10 +208,11 @@ function DashboardPage() {
   const top20 = useMemo(() => customerGroups.slice(0, 20), [customerGroups]);
 
   function refresh() {
-    if (apiKey) mutation.mutate({ apiKey, fromDate, toDate, salesperson, termCode });
+    if (token) mutation.mutate({ fromDate, toDate, salesperson, termCode });
   }
   function signOut() {
     sessionStorage.removeItem("qne_api_key");
+    sessionStorage.removeItem("qne_jwt");
     navigate({ to: "/" });
   }
 
@@ -225,6 +282,12 @@ function DashboardPage() {
           loading={loading}
           fetchedAt={data?.fetchedAt ?? null}
         />
+
+        {authError && (
+          <div role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
+            {authError}
+          </div>
+        )}
 
         {mutation.isError && (
           <div role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
