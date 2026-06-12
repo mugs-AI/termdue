@@ -59,6 +59,8 @@ function SignInPage() {
     navigate({ to: "/dashboard" });
   }
 
+  const isProd = import.meta.env.PROD;
+
   return (
     <main className="min-h-screen flex items-center justify-center bg-background px-4">
       <div className="w-full max-w-md">
@@ -67,48 +69,51 @@ function SignInPage() {
             Overdue Invoices
           </h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Launch this app from N3 — your API key is passed automatically and
-            N3 enforces which companies and invoices you can see. You can also
-            paste a key manually below.
+            {isProd
+              ? "Waiting for N3 to launch this app with your API key…"
+              : "Launch from N3 — the API key is passed automatically. You can also paste a key manually below (dev only)."}
           </p>
         </div>
-        <form
-          onSubmit={onSubmit}
-          className="rounded-xl border border-border bg-card p-6 shadow-sm space-y-4"
-        >
-          <div className="space-y-2">
-            <label htmlFor="key" className="text-sm font-medium text-foreground">
-              N3 API key
-            </label>
-            <input
-              id="key"
-              type="password"
-              autoComplete="off"
-              spellCheck={false}
-              placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-              value={apiKey}
-              onChange={(e) => {
-                setApiKey(e.target.value);
-                setError(null);
-              }}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
-            />
-            <p className="text-xs text-muted-foreground">
-              In production, N3 launches this app with <code>?api-key=…</code> appended to the URL.
-            </p>
-          </div>
-          {error && (
-            <p role="alert" className="text-sm text-destructive">
-              {error}
-            </p>
-          )}
-          <button
-            type="submit"
-            className="w-full rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+
+        {!isProd && (
+          <form
+            onSubmit={onSubmit}
+            className="rounded-xl border border-border bg-card p-6 shadow-sm space-y-4"
           >
-            Continue
-          </button>
-        </form>
+            <div className="space-y-2">
+              <label htmlFor="key" className="text-sm font-medium text-foreground">
+                N3 API key (dev only)
+              </label>
+              <input
+                id="key"
+                type="password"
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                value={apiKey}
+                onChange={(e) => {
+                  setApiKey(e.target.value);
+                  setError(null);
+                }}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
+              />
+              <p className="text-xs text-muted-foreground">
+                In production, N3 launches this app with <code>?api-key=…</code> appended to the URL.
+              </p>
+            </div>
+            {error && (
+              <p role="alert" className="text-sm text-destructive">
+                {error}
+              </p>
+            )}
+            <button
+              type="submit"
+              className="w-full rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+            >
+              Continue
+            </button>
+          </form>
+        )}
       </div>
     </main>
   );
