@@ -103,6 +103,22 @@ function DashboardPage() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    const guid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+    const url = new URL(window.location.href);
+    const fromUrl =
+      url.searchParams.get("api-key") ||
+      url.searchParams.get("apiKey") ||
+      url.searchParams.get("apikey") ||
+      "";
+    if (fromUrl && guid.test(fromUrl.trim())) {
+      sessionStorage.setItem("qne_api_key", fromUrl.trim());
+      url.searchParams.delete("api-key");
+      url.searchParams.delete("apiKey");
+      url.searchParams.delete("apikey");
+      window.history.replaceState({}, "", url.pathname + url.search);
+      setApiKey(fromUrl.trim());
+      return;
+    }
     const k = sessionStorage.getItem("qne_api_key");
     if (!k) {
       navigate({ to: "/" });
