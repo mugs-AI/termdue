@@ -89,8 +89,16 @@ function DashboardPage() {
   });
 
   const insights = useMutation({
-    mutationFn: (vars: Parameters<typeof getAiInsights>[0]["data"]) =>
-      insightsFn({ data: vars }) as Promise<{ tips: string[] }>,
+    mutationFn: (vars: {
+      summary: {
+        totalCount: number;
+        totalOutstanding: number;
+        currency: string;
+        topCustomers: { customerName: string; outstanding: number; count: number }[];
+        bucketsByAge: Record<string, number>;
+        oldestDays: number;
+      };
+    }) => insightsFn({ data: vars }) as Promise<{ tips: string[] }>,
   });
 
   useEffect(() => {
