@@ -26,15 +26,35 @@ function SignInPage() {
     if (typeof window === "undefined") return;
 
     const url = new URL(window.location.href);
-    const fromUrl =
+
+    // N3 launches the app with a ready-made JWT in `?token=...` — use it directly.
+    const jwtFromUrl =
+      url.searchParams.get("token") ||
+      url.searchParams.get("access_token") ||
+      url.searchParams.get("jwt") ||
+      "";
+    const looksLikeJwt = /^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(jwtFromUrl.trim());
+
+    if (jwtFromUrl && looksLikeJwt) {
+      sessionStorage.setItem("qne_jwt", jwtFromUrl.trim());
+      sessionStorage.removeItem("qne_api_key");
+      url.searchParams.delete("token");
+      url.searchParams.delete("access_token");
+      url.searchParams.delete("jwt");
+      window.history.replaceState({}, "", url.pathname + url.search);
+      navigate({ to: "/dashboard" });
+      return;
+    }
+
+    // Fallback: also accept an API-key GUID (older marketplace handoff or dev).
+    const keyFromUrl =
       url.searchParams.get("api-key") ||
       url.searchParams.get("apiKey") ||
       url.searchParams.get("apikey") ||
       "";
 
-    if (fromUrl && GUID.test(fromUrl.trim())) {
-      sessionStorage.setItem("qne_api_key", fromUrl.trim());
-      // Strip the key from the address bar so it isn't shoulder-surfed or logged.
+    if (keyFromUrl && GUID.test(keyFromUrl.trim())) {
+      sessionStorage.setItem("qne_api_key", keyFromUrl.trim());
       url.searchParams.delete("api-key");
       url.searchParams.delete("apiKey");
       url.searchParams.delete("apikey");
@@ -43,7 +63,7 @@ function SignInPage() {
       return;
     }
 
-    if (sessionStorage.getItem("qne_api_key")) {
+    if (sessionStorage.getItem("qne_jwt") || sessionStorage.getItem("qne_api_key")) {
       navigate({ to: "/dashboard" });
     }
   }, [navigate]);
