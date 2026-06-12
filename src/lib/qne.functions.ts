@@ -82,10 +82,35 @@ async function getCompanyName(jwt: string): Promise<string | undefined> {
   }
 }
 
+export const exchangeApiKey = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown) => ExchangeSchema.parse(input))
+  .handler(async ({ data }): Promise<{ token: string; companyName?: string }> => {
+    const token = await getJwt(data.apiKey);
+    const companyName = await getCompanyName(token);
+    return { token, companyName };
+  });
+
+export const refreshSession = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown) => RefreshSchema.parse(input))
+  .handler(async ({ data }): Promise<{ token: string }> => {
+    const res = await fetch(`${QNE_BASE}/api/Auth/Refresh`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${data.token}` },
+    });
+    if (!res.ok) {
+      throw new QneUnauthorizedError(`QNE refresh failed (${res.status}).`);
+    }
+    const body = (await res.json()) as { code?: string; message?: string; data?: { token?: string } };
+    if (body.code !== "0000" || !body.data?.token) {
+      throw new QneUnauthorizedError(body.message || "QNE refresh rejected.");
+    }
+    return { token: body.data.token };
+  });
+
 export const fetchOverdueInvoices = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => InputSchema.parse(input))
   .handler(async ({ data }): Promise<OverdueResult> => {
-    const jwt = await getJwt(data.apiKey);
+    const jwt = data.token;
     const today = new Date().toISOString().slice(0, 10);
 
     const filterParts = [
@@ -112,6 +137,9 @@ export const fetchOverdueInvoices = createServerFn({ method: "POST" })
       getCompanyName(jwt),
     ]);
 
+    if (invRes.status === 401) {
+      throw new QneUnauthorizedError();
+    }
     if (!invRes.ok) {
       const text = await invRes.text();
       throw new Error(`QNE invoice fetch failed (${invRes.status}): ${text.slice(0, 200)}`);
