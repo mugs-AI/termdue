@@ -59,6 +59,7 @@ export type OverdueResult = {
   companyName?: string;
   salespeople: string[];
   termCodes: string[];
+  customerStatuses: Record<string, number>;
 };
 
 async function getJwt(apiKey: string): Promise<string> {
@@ -221,6 +222,33 @@ export const fetchOverdueInvoices = createServerFn({ method: "POST" })
     const currency = invoices[0]?.currencyCode ?? "";
     const salespeople = Array.from(new Set(invoices.map((i) => i.salespersonCode).filter(Boolean))).sort();
     const termCodes = Array.from(new Set(invoices.map((i) => i.termCode).filter(Boolean))).sort();
+    const customerIds = Array.from(
+      new Set(invoices.map((invoice) => invoice.customerId).filter((id): id is number => id !== null)),
+    );
+    const customerStatuses: Record<string, number> = {};
+
+    if (customerIds.length > 0) {
+      const customersUrl = new URL(`${QNE_BASE}/api/Customers/List`);
+      customersUrl.searchParams.set("$filter", `id in (${customerIds.join(",")})`);
+      customersUrl.searchParams.set("$top", String(customerIds.length));
+      const customersRes = await fetch(customersUrl, {
+        headers: { Authorization: `Bearer ${jwt}` },
+      });
+      if (customersRes.status === 401) throw new QneUnauthorizedError();
+      if (customersRes.ok) {
+        const customersBody = (await customersRes.json()) as {
+          code?: string;
+          data?: { value?: Array<{ id?: number; status?: number }> };
+        };
+        if (customersBody.code === "0000") {
+          for (const customer of customersBody.data?.value ?? []) {
+            if (customer.id !== undefined && customer.status !== undefined) {
+              customerStatuses[String(customer.id)] = customer.status;
+            }
+          }
+        }
+      }
+    }
 
     return {
       fetchedAt: new Date().toISOString(),
@@ -233,6 +261,7 @@ export const fetchOverdueInvoices = createServerFn({ method: "POST" })
       companyName,
       salespeople,
       termCodes,
+      customerStatuses,
     };
   });
 
