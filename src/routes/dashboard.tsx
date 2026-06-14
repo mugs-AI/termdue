@@ -89,7 +89,7 @@ function DashboardPage() {
   const [termCode, setTermCode] = useState("");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [topCount, setTopCount] = useState(20);
-  const [customerStatuses, setCustomerStatuses] = useState<Record<number, 0 | 3>>({});
+  const [customerStatusOverrides, setCustomerStatusOverrides] = useState<Record<number, 0 | 3>>({});
 
   // Run a fetch with one transparent JWT refresh on 401.
   async function fetchWithRefresh(vars: {
@@ -151,7 +151,7 @@ function DashboardPage() {
       }
     },
     onSuccess: ({ status }, customerId) => {
-      setCustomerStatuses((current) => ({ ...current, [customerId]: status }));
+      setCustomerStatusOverrides((current) => ({ ...current, [customerId]: status }));
     },
   });
 
@@ -362,7 +362,8 @@ function DashboardPage() {
           toggle={(k) => setExpanded((e) => ({ ...e, [k]: !e[k] }))}
           loading={loading && !data}
           currency={data?.currency ?? ""}
-          statuses={customerStatuses}
+          statuses={data?.customerStatuses ?? {}}
+          statusOverrides={customerStatusOverrides}
           statusPendingId={customerStatusMutation.isPending ? customerStatusMutation.variables : undefined}
           statusError={customerStatusMutation.isError ? (customerStatusMutation.error as Error).message : null}
           onToggleStatus={(customerId) => customerStatusMutation.mutate(customerId)}
@@ -621,6 +622,7 @@ function CustomerGroups({
   loading,
   currency,
   statuses,
+  statusOverrides,
   statusPendingId,
   statusError,
   onToggleStatus,
@@ -630,7 +632,8 @@ function CustomerGroups({
   toggle: (k: string) => void;
   loading: boolean;
   currency: string;
-  statuses: Record<number, 0 | 3>;
+  statuses: Record<string, number>;
+  statusOverrides: Record<number, 0 | 3>;
   statusPendingId: number | undefined;
   statusError: string | null;
   onToggleStatus: (customerId: number) => void;
@@ -661,7 +664,8 @@ function CustomerGroups({
           const key = g.code || g.name;
           const open = !!expanded[key];
           const accent = PALETTE[idx % PALETTE.length];
-          const suspended = g.customerId !== null && statuses[g.customerId] === 3;
+          const suspended =
+            g.customerId !== null && (statusOverrides[g.customerId] ?? statuses[String(g.customerId)]) === 3;
           return (
             <li key={key}>
               <div className="flex flex-wrap items-center gap-3 px-5 py-3 hover:bg-accent/40">
