@@ -320,7 +320,7 @@ export const getAiInsights = createServerFn({ method: "POST" })
     const text = body.choices?.[0]?.message?.content ?? "";
     const tips = text
       .split(/\n+/)
-      .map((s) => s.replace(/^[-*\d.\)\s]+/, "").trim())
+      .map((s) => s.replace(/^[-*\d.)\s]+/, "").trim())
       .filter((s) => s.length > 0)
       .slice(0, 6);
     return { tips };
