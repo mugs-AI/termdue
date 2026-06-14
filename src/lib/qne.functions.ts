@@ -19,6 +19,11 @@ const RefreshSchema = z.object({
   token: z.string().min(20),
 });
 
+const ToggleCustomerStatusSchema = z.object({
+  token: z.string().min(20),
+  customerId: z.number().int().positive(),
+});
+
 export class QneUnauthorizedError extends Error {
   constructor(message = "QNE session expired") {
     super(message);
@@ -28,6 +33,7 @@ export class QneUnauthorizedError extends Error {
 
 export type OverdueInvoice = {
   id: string;
+  customerId: number | null;
   docCode: string;
   refNo: string;
   docDate: string;
@@ -107,6 +113,39 @@ export const refreshSession = createServerFn({ method: "POST" })
     return { token: body.data.token };
   });
 
+export const toggleCustomerSuspension = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown) => ToggleCustomerStatusSchema.parse(input))
+  .handler(async ({ data }): Promise<{ status: 0 | 3 }> => {
+    const headers = { Authorization: `Bearer ${data.token}` };
+    const customerRes = await fetch(`${QNE_BASE}/api/Customers/${data.customerId}`, { headers });
+    if (customerRes.status === 401) throw new QneUnauthorizedError();
+    if (!customerRes.ok) throw new Error(`Unable to load the QNE customer (${customerRes.status}).`);
+
+    const customerBody = (await customerRes.json()) as {
+      code?: string;
+      message?: string;
+      data?: Record<string, unknown> & { status?: number };
+    };
+    if (customerBody.code !== "0000" || !customerBody.data) {
+      throw new Error(customerBody.message || "QNE could not find this customer.");
+    }
+
+    const status: 0 | 3 = customerBody.data.status === 3 ? 0 : 3;
+    const updateRes = await fetch(`${QNE_BASE}/api/Customers/Update`, {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ ...customerBody.data, status }),
+    });
+    if (updateRes.status === 401) throw new QneUnauthorizedError();
+    if (!updateRes.ok) throw new Error(`Unable to update the QNE customer (${updateRes.status}).`);
+
+    const updateBody = (await updateRes.json()) as { code?: string; message?: string };
+    if (updateBody.code !== "0000") {
+      throw new Error(updateBody.message || "QNE rejected the customer status update.");
+    }
+    return { status };
+  });
+
 export const fetchOverdueInvoices = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => InputSchema.parse(input))
   .handler(async ({ data }): Promise<OverdueResult> => {
@@ -162,6 +201,7 @@ export const fetchOverdueInvoices = createServerFn({ method: "POST" })
         : 0;
       return {
         id: String(r.id ?? ""),
+        customerId: Number.isInteger(Number(r.customerId)) ? Number(r.customerId) : null,
         docCode: String(r.docCode ?? ""),
         refNo: String(r.refNo ?? r.referenceNo ?? r.reference ?? ""),
         docDate: String(r.docDate ?? "").slice(0, 10),
