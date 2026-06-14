@@ -2,23 +2,24 @@ import { createFileRoute, useNavigate, useRouter } from "@tanstack/react-router"
 import { useEffect, useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  Cell,
-} from "recharts";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import {
   fetchOverdueInvoices,
   getAiInsights,
   exchangeApiKey,
   refreshSession,
+  toggleCustomerSuspension,
   type OverdueInvoice,
   type OverdueResult,
 } from "@/lib/qne.functions";
+import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 export const Route = createFileRoute("/dashboard")({
   head: () => ({
@@ -51,12 +52,30 @@ export const Route = createFileRoute("/dashboard")({
 });
 
 const N3_INVOICE_URL = (id: string) => `https://n3.qne.cloud/#/sale/inv/detail/${id}`;
+const N3_RECEIVE_PAYMENT_URL = (customerId: number) =>
+  `https://n3.qne.cloud/#/ar/or/detail/0?customerId=${encodeURIComponent(customerId)}`;
 
 const PALETTE = [
-  "#6366f1", "#ec4899", "#f59e0b", "#10b981", "#06b6d4",
-  "#8b5cf6", "#ef4444", "#84cc16", "#0ea5e9", "#f97316",
-  "#14b8a6", "#a855f7", "#eab308", "#22c55e", "#3b82f6",
-  "#d946ef", "#f43f5e", "#65a30d", "#0284c7", "#fb923c",
+  "#6366f1",
+  "#ec4899",
+  "#f59e0b",
+  "#10b981",
+  "#06b6d4",
+  "#8b5cf6",
+  "#ef4444",
+  "#84cc16",
+  "#0ea5e9",
+  "#f97316",
+  "#14b8a6",
+  "#a855f7",
+  "#eab308",
+  "#22c55e",
+  "#3b82f6",
+  "#d946ef",
+  "#f43f5e",
+  "#65a30d",
+  "#0284c7",
+  "#fb923c",
 ];
 
 function todayISO() {
@@ -74,6 +93,7 @@ function DashboardPage() {
   const insightsFn = useServerFn(getAiInsights);
   const exchangeFn = useServerFn(exchangeApiKey);
   const refreshFn = useServerFn(refreshSession);
+  const toggleCustomerFn = useServerFn(toggleCustomerSuspension);
 
   const [token, setToken] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -82,6 +102,8 @@ function DashboardPage() {
   const [salesperson, setSalesperson] = useState("");
   const [termCode, setTermCode] = useState("");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [topCount, setTopCount] = useState(20);
+  const [customerStatusOverrides, setCustomerStatusOverrides] = useState<Record<number, 0 | 3>>({});
 
   // Run a fetch with one transparent JWT refresh on 401.
   async function fetchWithRefresh(vars: {
@@ -125,6 +147,26 @@ function DashboardPage() {
         oldestDays: number;
       };
     }) => insightsFn({ data: vars }) as Promise<{ tips: string[] }>,
+  });
+
+  const customerStatusMutation = useMutation({
+    mutationFn: async (customerId: number) => {
+      const current = token ?? sessionStorage.getItem("qne_jwt");
+      if (!current) throw new Error("Not signed in");
+      try {
+        return await toggleCustomerFn({ data: { token: current, customerId } });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (!/QneUnauthorized|session expired|401/i.test(message)) throw error;
+        const { token: fresh } = await refreshFn({ data: { token: current } });
+        sessionStorage.setItem("qne_jwt", fresh);
+        setToken(fresh);
+        return toggleCustomerFn({ data: { token: fresh, customerId } });
+      }
+    },
+    onSuccess: ({ status }, customerId) => {
+      setCustomerStatusOverrides((current) => ({ ...current, [customerId]: status }));
+    },
   });
 
   // Bootstrap: accept a JWT directly from N3 (`?token=...`), fall back to an
@@ -215,10 +257,25 @@ function DashboardPage() {
 
   const customerGroups = useMemo(() => {
     if (!data) return [];
-    const map = new Map<string, { code: string; name: string; invoices: OverdueInvoice[]; total: number }>();
+    const map = new Map<
+      string,
+      {
+        customerId: number | null;
+        code: string;
+        name: string;
+        invoices: OverdueInvoice[];
+        total: number;
+      }
+    >();
     for (const inv of data.invoices) {
       const key = inv.customerCode || inv.customerName || "—";
-      const g = map.get(key) ?? { code: inv.customerCode, name: inv.customerName, invoices: [], total: 0 };
+      const g = map.get(key) ?? {
+        customerId: inv.customerId,
+        code: inv.customerCode,
+        name: inv.customerName,
+        invoices: [],
+        total: 0,
+      };
       g.invoices.push(inv);
       g.total += inv.outstandingAmount;
       map.set(key, g);
@@ -226,7 +283,7 @@ function DashboardPage() {
     return Array.from(map.values()).sort((a, b) => b.total - a.total);
   }, [data]);
 
-  const top20 = useMemo(() => customerGroups.slice(0, 20), [customerGroups]);
+  const topCustomers = useMemo(() => customerGroups.slice(0, topCount), [customerGroups, topCount]);
 
   function refresh() {
     if (token) mutation.mutate({ fromDate, toDate, salesperson, termCode });
@@ -253,7 +310,7 @@ function DashboardPage() {
         totalCount: data.invoices.length,
         totalOutstanding: data.totalOutstanding,
         currency: data.currency,
-        topCustomers: top20.slice(0, 10).map((g) => ({
+        topCustomers: customerGroups.slice(0, 10).map((g) => ({
           customerName: g.name,
           outstanding: g.total,
           count: g.invoices.length,
@@ -305,13 +362,19 @@ function DashboardPage() {
         />
 
         {authError && (
-          <div role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
+          <div
+            role="alert"
+            className="rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive"
+          >
             {authError}
           </div>
         )}
 
         {mutation.isError && (
-          <div role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
+          <div
+            role="alert"
+            className="rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive"
+          >
             {(mutation.error as Error).message}
           </div>
         )}
@@ -326,7 +389,12 @@ function DashboardPage() {
           disabled={!data || data.invoices.length === 0}
         />
 
-        <TopCustomersChart top={top20} currency={data?.currency ?? ""} />
+        <TopCustomersChart
+          top={topCustomers}
+          count={topCount}
+          onCountChange={setTopCount}
+          currency={data?.currency ?? ""}
+        />
 
         <CustomerGroups
           groups={customerGroups}
@@ -334,6 +402,15 @@ function DashboardPage() {
           toggle={(k) => setExpanded((e) => ({ ...e, [k]: !e[k] }))}
           loading={loading && !data}
           currency={data?.currency ?? ""}
+          statuses={data?.customerStatuses ?? {}}
+          statusOverrides={customerStatusOverrides}
+          statusPendingId={
+            customerStatusMutation.isPending ? customerStatusMutation.variables : undefined
+          }
+          statusError={
+            customerStatusMutation.isError ? (customerStatusMutation.error as Error).message : null
+          }
+          onToggleStatus={(customerId) => customerStatusMutation.mutate(customerId)}
         />
       </section>
     </main>
@@ -358,7 +435,9 @@ function Filters({
   termCode: string;
   salespeople: string[];
   termCodes: string[];
-  onChange: (p: Partial<{ fromDate: string; toDate: string; salesperson: string; termCode: string }>) => void;
+  onChange: (
+    p: Partial<{ fromDate: string; toDate: string; salesperson: string; termCode: string }>,
+  ) => void;
   onRefresh: () => void;
   loading: boolean;
   fetchedAt: string | null;
@@ -405,7 +484,9 @@ function Filters({
         >
           <option value="">All</option>
           {salespeople.map((s) => (
-            <option key={s} value={s}>{s}</option>
+            <option key={s} value={s}>
+              {s}
+            </option>
           ))}
         </select>
       </div>
@@ -418,7 +499,9 @@ function Filters({
         >
           <option value="">All</option>
           {termCodes.map((t) => (
-            <option key={t} value={t}>{t}</option>
+            <option key={t} value={t}>
+              {t}
+            </option>
           ))}
         </select>
       </div>
@@ -466,18 +549,22 @@ function StatsGrid({ data, loading }: { data: OverdueResult | undefined; loading
     },
     {
       label: "Oldest days overdue",
-      value: data && data.invoices.length ? `${Math.max(...data.invoices.map((i) => i.daysOverdue))} days` : "—",
+      value:
+        data && data.invoices.length
+          ? `${Math.max(...data.invoices.map((i) => i.daysOverdue))} days`
+          : "—",
       grad: "from-amber-500 to-orange-500",
     },
   ];
   return (
     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
       {items.map((it) => (
-        <div key={it.label} className={`rounded-xl p-5 text-white bg-gradient-to-br ${it.grad} shadow-md`}>
+        <div
+          key={it.label}
+          className={`rounded-xl p-5 text-white bg-gradient-to-br ${it.grad} shadow-md`}
+        >
           <div className="text-xs uppercase tracking-wide opacity-90">{it.label}</div>
-          <div className="mt-2 text-2xl font-semibold">
-            {loading && !data ? "…" : it.value}
-          </div>
+          <div className="mt-2 text-2xl font-semibold">{loading && !data ? "…" : it.value}</div>
         </div>
       ))}
     </div>
@@ -502,7 +589,9 @@ function AiInsights({
       <div className="flex items-center justify-between gap-3">
         <div>
           <h2 className="text-base font-semibold text-foreground">AI Insight Tips</h2>
-          <p className="text-xs text-muted-foreground">Powered by AI — reviews your current overdue snapshot.</p>
+          <p className="text-xs text-muted-foreground">
+            Powered by AI — reviews your current overdue snapshot.
+          </p>
         </div>
         <button
           onClick={onRun}
@@ -516,7 +605,10 @@ function AiInsights({
       {tips && tips.length > 0 && (
         <ul className="mt-4 grid gap-2 sm:grid-cols-2">
           {tips.map((t, i) => (
-            <li key={i} className="rounded-lg border border-border bg-card/70 p-3 text-sm text-foreground">
+            <li
+              key={i}
+              className="rounded-lg border border-border bg-card/70 p-3 text-sm text-foreground"
+            >
               <span className="mr-2 text-violet-500">✦</span>
               {t}
             </li>
@@ -529,9 +621,13 @@ function AiInsights({
 
 function TopCustomersChart({
   top,
+  count,
+  onCountChange,
   currency,
 }: {
   top: { code: string; name: string; total: number }[];
+  count: number;
+  onCountChange: (count: number) => void;
   currency: string;
 }) {
   if (top.length === 0) return null;
@@ -541,9 +637,27 @@ function TopCustomersChart({
   }));
   return (
     <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
-      <h2 className="text-base font-semibold text-foreground">Top 20 customers by overdue</h2>
-      <p className="text-xs text-muted-foreground mb-4">Total outstanding ({currency || "—"})</p>
-      <div className="w-full h-[420px]">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-foreground">
+            Top {count} customers by overdue
+          </h2>
+          <p className="text-xs text-muted-foreground">Total outstanding ({currency || "—"})</p>
+        </div>
+        <Select value={String(count)} onValueChange={(value) => onCountChange(Number(value))}>
+          <SelectTrigger className="w-28" aria-label="Number of customers to display">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {[10, 20, 30, 50].map((option) => (
+              <SelectItem key={option} value={String(option)}>
+                Top {option}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="w-full" style={{ height: Math.max(320, count * 22) }}>
         <ResponsiveContainer>
           <BarChart data={chartData} layout="vertical" margin={{ left: 8, right: 24 }}>
             <XAxis type="number" tick={{ fontSize: 11 }} />
@@ -570,12 +684,28 @@ function CustomerGroups({
   toggle,
   loading,
   currency,
+  statuses,
+  statusOverrides,
+  statusPendingId,
+  statusError,
+  onToggleStatus,
 }: {
-  groups: { code: string; name: string; invoices: OverdueInvoice[]; total: number }[];
+  groups: {
+    customerId: number | null;
+    code: string;
+    name: string;
+    invoices: OverdueInvoice[];
+    total: number;
+  }[];
   expanded: Record<string, boolean>;
   toggle: (k: string) => void;
   loading: boolean;
   currency: string;
+  statuses: Record<string, number>;
+  statusOverrides: Record<number, 0 | 3>;
+  statusPendingId: number | undefined;
+  statusError: string | null;
+  onToggleStatus: (customerId: number) => void;
 }) {
   if (loading) {
     return (
@@ -595,33 +725,81 @@ function CustomerGroups({
     <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
       <div className="px-5 py-3 border-b border-border bg-muted/40">
         <h2 className="text-base font-semibold text-foreground">Overdue by customer</h2>
-        <p className="text-xs text-muted-foreground">Click a customer to expand invoices. Click an invoice to open in N3.</p>
+        <p className="text-xs text-muted-foreground">
+          Expand invoices, manage customer status, or start a payment in N3.
+        </p>
+        {statusError && (
+          <p role="alert" className="mt-2 text-xs text-destructive">
+            {statusError}
+          </p>
+        )}
       </div>
       <ul className="divide-y divide-border">
         {groups.map((g, idx) => {
           const key = g.code || g.name;
           const open = !!expanded[key];
           const accent = PALETTE[idx % PALETTE.length];
+          const suspended =
+            g.customerId !== null &&
+            (statusOverrides[g.customerId] ?? statuses[String(g.customerId)]) === 3;
           return (
             <li key={key}>
-              <button
-                onClick={() => toggle(key)}
-                className="w-full flex items-center gap-3 px-5 py-3 text-left hover:bg-accent/40"
-              >
+              <div className="flex flex-wrap items-center gap-3 px-5 py-3 hover:bg-accent/40">
                 <span
                   className="inline-block h-2.5 w-2.5 rounded-full"
                   style={{ backgroundColor: accent }}
                 />
-                <span className="flex-1">
-                  <span className="font-medium text-foreground">{g.name || "(no name)"}</span>
-                  <span className="ml-2 text-xs text-muted-foreground">{g.code}</span>
-                </span>
+                <Button
+                  variant="ghost"
+                  className="h-auto min-w-0 flex-1 justify-start px-0 py-0 text-left hover:bg-transparent"
+                  onClick={() => toggle(key)}
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="font-medium text-foreground">{g.name || "(no name)"}</span>
+                    <span className="ml-2 text-xs text-muted-foreground">{g.code}</span>
+                  </span>
+                  <span
+                    className={`text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`}
+                  >
+                    ›
+                  </span>
+                </Button>
                 <span className="text-xs text-muted-foreground">{g.invoices.length} inv</span>
                 <span className="w-40 text-right tabular-nums font-semibold text-foreground">
                   {fmtMoney(g.total, g.invoices[0]?.currencyCode || currency)}
                 </span>
-                <span className={`ml-2 text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`}>›</span>
-              </button>
+                <Button
+                  size="sm"
+                  variant={suspended ? "secondary" : "destructive"}
+                  disabled={g.customerId === null || statusPendingId === g.customerId}
+                  onClick={() => g.customerId !== null && onToggleStatus(g.customerId)}
+                  title={g.customerId === null ? "Customer ID is unavailable" : undefined}
+                >
+                  {statusPendingId === g.customerId
+                    ? "Updating…"
+                    : suspended
+                      ? "Activate"
+                      : "Suspend"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  asChild={g.customerId !== null}
+                  disabled={g.customerId === null}
+                >
+                  {g.customerId !== null ? (
+                    <a
+                      href={N3_RECEIVE_PAYMENT_URL(g.customerId)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      Receive payment ↗
+                    </a>
+                  ) : (
+                    <span>Receive payment</span>
+                  )}
+                </Button>
+              </div>
               {open && (
                 <div className="overflow-x-auto bg-muted/20">
                   <table className="w-full text-sm">
@@ -654,7 +832,9 @@ function CustomerGroups({
                           <td className="px-3 py-2 text-foreground">{inv.refNo || "—"}</td>
                           <td className="px-3 py-2 text-muted-foreground">{inv.docDate}</td>
                           <td className="px-3 py-2 text-muted-foreground">{inv.dueDate ?? "—"}</td>
-                          <td className="px-3 py-2 text-muted-foreground">{inv.salespersonCode || "—"}</td>
+                          <td className="px-3 py-2 text-muted-foreground">
+                            {inv.salespersonCode || "—"}
+                          </td>
                           <td className="px-3 py-2 text-muted-foreground">{inv.termCode || "—"}</td>
                           <td className="px-3 py-2 text-right tabular-nums">
                             <span

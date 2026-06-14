@@ -19,6 +19,11 @@ const RefreshSchema = z.object({
   token: z.string().min(20),
 });
 
+const ToggleCustomerStatusSchema = z.object({
+  token: z.string().min(20),
+  customerId: z.number().int().positive(),
+});
+
 export class QneUnauthorizedError extends Error {
   constructor(message = "QNE session expired") {
     super(message);
@@ -28,6 +33,7 @@ export class QneUnauthorizedError extends Error {
 
 export type OverdueInvoice = {
   id: string;
+  customerId: number | null;
   docCode: string;
   refNo: string;
   docDate: string;
@@ -53,6 +59,7 @@ export type OverdueResult = {
   companyName?: string;
   salespeople: string[];
   termCodes: string[];
+  customerStatuses: Record<string, number>;
 };
 
 async function getJwt(apiKey: string): Promise<string> {
@@ -100,11 +107,49 @@ export const refreshSession = createServerFn({ method: "POST" })
     if (!res.ok) {
       throw new QneUnauthorizedError(`QNE refresh failed (${res.status}).`);
     }
-    const body = (await res.json()) as { code?: string; message?: string; data?: { token?: string } };
+    const body = (await res.json()) as {
+      code?: string;
+      message?: string;
+      data?: { token?: string };
+    };
     if (body.code !== "0000" || !body.data?.token) {
       throw new QneUnauthorizedError(body.message || "QNE refresh rejected.");
     }
     return { token: body.data.token };
+  });
+
+export const toggleCustomerSuspension = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown) => ToggleCustomerStatusSchema.parse(input))
+  .handler(async ({ data }): Promise<{ status: 0 | 3 }> => {
+    const headers = { Authorization: `Bearer ${data.token}` };
+    const customerRes = await fetch(`${QNE_BASE}/api/Customers/${data.customerId}`, { headers });
+    if (customerRes.status === 401) throw new QneUnauthorizedError();
+    if (!customerRes.ok)
+      throw new Error(`Unable to load the QNE customer (${customerRes.status}).`);
+
+    const customerBody = (await customerRes.json()) as {
+      code?: string;
+      message?: string;
+      data?: Record<string, unknown> & { status?: number };
+    };
+    if (customerBody.code !== "0000" || !customerBody.data) {
+      throw new Error(customerBody.message || "QNE could not find this customer.");
+    }
+
+    const status: 0 | 3 = customerBody.data.status === 3 ? 0 : 3;
+    const updateRes = await fetch(`${QNE_BASE}/api/Customers/Update`, {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ ...customerBody.data, status }),
+    });
+    if (updateRes.status === 401) throw new QneUnauthorizedError();
+    if (!updateRes.ok) throw new Error(`Unable to update the QNE customer (${updateRes.status}).`);
+
+    const updateBody = (await updateRes.json()) as { code?: string; message?: string };
+    if (updateBody.code !== "0000") {
+      throw new Error(updateBody.message || "QNE rejected the customer status update.");
+    }
+    return { status };
   });
 
 export const fetchOverdueInvoices = createServerFn({ method: "POST" })
@@ -162,6 +207,7 @@ export const fetchOverdueInvoices = createServerFn({ method: "POST" })
         : 0;
       return {
         id: String(r.id ?? ""),
+        customerId: Number.isInteger(Number(r.customerId)) ? Number(r.customerId) : null,
         docCode: String(r.docCode ?? ""),
         refNo: String(r.refNo ?? r.referenceNo ?? r.reference ?? ""),
         docDate: String(r.docDate ?? "").slice(0, 10),
@@ -179,8 +225,39 @@ export const fetchOverdueInvoices = createServerFn({ method: "POST" })
 
     const totalOutstanding = invoices.reduce((sum, i) => sum + i.outstandingAmount, 0);
     const currency = invoices[0]?.currencyCode ?? "";
-    const salespeople = Array.from(new Set(invoices.map((i) => i.salespersonCode).filter(Boolean))).sort();
+    const salespeople = Array.from(
+      new Set(invoices.map((i) => i.salespersonCode).filter(Boolean)),
+    ).sort();
     const termCodes = Array.from(new Set(invoices.map((i) => i.termCode).filter(Boolean))).sort();
+    const customerIds = Array.from(
+      new Set(
+        invoices.map((invoice) => invoice.customerId).filter((id): id is number => id !== null),
+      ),
+    );
+    const customerStatuses: Record<string, number> = {};
+
+    if (customerIds.length > 0) {
+      const customersUrl = new URL(`${QNE_BASE}/api/Customers/List`);
+      customersUrl.searchParams.set("$filter", `id in (${customerIds.join(",")})`);
+      customersUrl.searchParams.set("$top", String(customerIds.length));
+      const customersRes = await fetch(customersUrl, {
+        headers: { Authorization: `Bearer ${jwt}` },
+      });
+      if (customersRes.status === 401) throw new QneUnauthorizedError();
+      if (customersRes.ok) {
+        const customersBody = (await customersRes.json()) as {
+          code?: string;
+          data?: { value?: Array<{ id?: number; status?: number }> };
+        };
+        if (customersBody.code === "0000") {
+          for (const customer of customersBody.data?.value ?? []) {
+            if (customer.id !== undefined && customer.status !== undefined) {
+              customerStatuses[String(customer.id)] = customer.status;
+            }
+          }
+        }
+      }
+    }
 
     return {
       fetchedAt: new Date().toISOString(),
@@ -193,6 +270,7 @@ export const fetchOverdueInvoices = createServerFn({ method: "POST" })
       companyName,
       salespeople,
       termCodes,
+      customerStatuses,
     };
   });
 
@@ -242,7 +320,7 @@ export const getAiInsights = createServerFn({ method: "POST" })
     const text = body.choices?.[0]?.message?.content ?? "";
     const tips = text
       .split(/\n+/)
-      .map((s) => s.replace(/^[-*\d.\)\s]+/, "").trim())
+      .map((s) => s.replace(/^[-*\d.)\s]+/, "").trim())
       .filter((s) => s.length > 0)
       .slice(0, 6);
     return { tips };
