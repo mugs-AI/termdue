@@ -107,7 +107,11 @@ export const refreshSession = createServerFn({ method: "POST" })
     if (!res.ok) {
       throw new QneUnauthorizedError(`QNE refresh failed (${res.status}).`);
     }
-    const body = (await res.json()) as { code?: string; message?: string; data?: { token?: string } };
+    const body = (await res.json()) as {
+      code?: string;
+      message?: string;
+      data?: { token?: string };
+    };
     if (body.code !== "0000" || !body.data?.token) {
       throw new QneUnauthorizedError(body.message || "QNE refresh rejected.");
     }
@@ -120,7 +124,8 @@ export const toggleCustomerSuspension = createServerFn({ method: "POST" })
     const headers = { Authorization: `Bearer ${data.token}` };
     const customerRes = await fetch(`${QNE_BASE}/api/Customers/${data.customerId}`, { headers });
     if (customerRes.status === 401) throw new QneUnauthorizedError();
-    if (!customerRes.ok) throw new Error(`Unable to load the QNE customer (${customerRes.status}).`);
+    if (!customerRes.ok)
+      throw new Error(`Unable to load the QNE customer (${customerRes.status}).`);
 
     const customerBody = (await customerRes.json()) as {
       code?: string;
@@ -220,10 +225,14 @@ export const fetchOverdueInvoices = createServerFn({ method: "POST" })
 
     const totalOutstanding = invoices.reduce((sum, i) => sum + i.outstandingAmount, 0);
     const currency = invoices[0]?.currencyCode ?? "";
-    const salespeople = Array.from(new Set(invoices.map((i) => i.salespersonCode).filter(Boolean))).sort();
+    const salespeople = Array.from(
+      new Set(invoices.map((i) => i.salespersonCode).filter(Boolean)),
+    ).sort();
     const termCodes = Array.from(new Set(invoices.map((i) => i.termCode).filter(Boolean))).sort();
     const customerIds = Array.from(
-      new Set(invoices.map((invoice) => invoice.customerId).filter((id): id is number => id !== null)),
+      new Set(
+        invoices.map((invoice) => invoice.customerId).filter((id): id is number => id !== null),
+      ),
     );
     const customerStatuses: Record<string, number> = {};
 
