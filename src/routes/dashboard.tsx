@@ -16,9 +16,12 @@ import {
   getAiInsights,
   exchangeApiKey,
   refreshSession,
+  toggleCustomerSuspension,
   type OverdueInvoice,
   type OverdueResult,
 } from "@/lib/qne.functions";
+import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 export const Route = createFileRoute("/dashboard")({
   head: () => ({
@@ -51,6 +54,8 @@ export const Route = createFileRoute("/dashboard")({
 });
 
 const N3_INVOICE_URL = (id: string) => `https://n3.qne.cloud/#/sale/inv/detail/${id}`;
+const N3_RECEIVE_PAYMENT_URL = (customerId: number) =>
+  `https://n3.qne.cloud/#/ar/or/detail/0?customerId=${encodeURIComponent(customerId)}`;
 
 const PALETTE = [
   "#6366f1", "#ec4899", "#f59e0b", "#10b981", "#06b6d4",
@@ -74,6 +79,7 @@ function DashboardPage() {
   const insightsFn = useServerFn(getAiInsights);
   const exchangeFn = useServerFn(exchangeApiKey);
   const refreshFn = useServerFn(refreshSession);
+  const toggleCustomerFn = useServerFn(toggleCustomerSuspension);
 
   const [token, setToken] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -82,6 +88,8 @@ function DashboardPage() {
   const [salesperson, setSalesperson] = useState("");
   const [termCode, setTermCode] = useState("");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [topCount, setTopCount] = useState(20);
+  const [customerStatuses, setCustomerStatuses] = useState<Record<number, 0 | 3>>({});
 
   // Run a fetch with one transparent JWT refresh on 401.
   async function fetchWithRefresh(vars: {
@@ -125,6 +133,26 @@ function DashboardPage() {
         oldestDays: number;
       };
     }) => insightsFn({ data: vars }) as Promise<{ tips: string[] }>,
+  });
+
+  const customerStatusMutation = useMutation({
+    mutationFn: async (customerId: number) => {
+      const current = token ?? sessionStorage.getItem("qne_jwt");
+      if (!current) throw new Error("Not signed in");
+      try {
+        return await toggleCustomerFn({ data: { token: current, customerId } });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (!/QneUnauthorized|session expired|401/i.test(message)) throw error;
+        const { token: fresh } = await refreshFn({ data: { token: current } });
+        sessionStorage.setItem("qne_jwt", fresh);
+        setToken(fresh);
+        return toggleCustomerFn({ data: { token: fresh, customerId } });
+      }
+    },
+    onSuccess: ({ status }, customerId) => {
+      setCustomerStatuses((current) => ({ ...current, [customerId]: status }));
+    },
   });
 
   // Bootstrap: accept a JWT directly from N3 (`?token=...`), fall back to an
@@ -215,10 +243,10 @@ function DashboardPage() {
 
   const customerGroups = useMemo(() => {
     if (!data) return [];
-    const map = new Map<string, { code: string; name: string; invoices: OverdueInvoice[]; total: number }>();
+    const map = new Map<string, { customerId: number | null; code: string; name: string; invoices: OverdueInvoice[]; total: number }>();
     for (const inv of data.invoices) {
       const key = inv.customerCode || inv.customerName || "—";
-      const g = map.get(key) ?? { code: inv.customerCode, name: inv.customerName, invoices: [], total: 0 };
+      const g = map.get(key) ?? { customerId: inv.customerId, code: inv.customerCode, name: inv.customerName, invoices: [], total: 0 };
       g.invoices.push(inv);
       g.total += inv.outstandingAmount;
       map.set(key, g);
@@ -226,7 +254,7 @@ function DashboardPage() {
     return Array.from(map.values()).sort((a, b) => b.total - a.total);
   }, [data]);
 
-  const top20 = useMemo(() => customerGroups.slice(0, 20), [customerGroups]);
+  const topCustomers = useMemo(() => customerGroups.slice(0, topCount), [customerGroups, topCount]);
 
   function refresh() {
     if (token) mutation.mutate({ fromDate, toDate, salesperson, termCode });
@@ -253,7 +281,7 @@ function DashboardPage() {
         totalCount: data.invoices.length,
         totalOutstanding: data.totalOutstanding,
         currency: data.currency,
-        topCustomers: top20.slice(0, 10).map((g) => ({
+        topCustomers: customerGroups.slice(0, 10).map((g) => ({
           customerName: g.name,
           outstanding: g.total,
           count: g.invoices.length,
@@ -326,7 +354,7 @@ function DashboardPage() {
           disabled={!data || data.invoices.length === 0}
         />
 
-        <TopCustomersChart top={top20} currency={data?.currency ?? ""} />
+        <TopCustomersChart top={topCustomers} count={topCount} onCountChange={setTopCount} currency={data?.currency ?? ""} />
 
         <CustomerGroups
           groups={customerGroups}
@@ -334,6 +362,10 @@ function DashboardPage() {
           toggle={(k) => setExpanded((e) => ({ ...e, [k]: !e[k] }))}
           loading={loading && !data}
           currency={data?.currency ?? ""}
+          statuses={customerStatuses}
+          statusPendingId={customerStatusMutation.isPending ? customerStatusMutation.variables : undefined}
+          statusError={customerStatusMutation.isError ? (customerStatusMutation.error as Error).message : null}
+          onToggleStatus={(customerId) => customerStatusMutation.mutate(customerId)}
         />
       </section>
     </main>
@@ -529,9 +561,13 @@ function AiInsights({
 
 function TopCustomersChart({
   top,
+  count,
+  onCountChange,
   currency,
 }: {
   top: { code: string; name: string; total: number }[];
+  count: number;
+  onCountChange: (count: number) => void;
   currency: string;
 }) {
   if (top.length === 0) return null;
@@ -541,9 +577,23 @@ function TopCustomersChart({
   }));
   return (
     <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
-      <h2 className="text-base font-semibold text-foreground">Top 20 customers by overdue</h2>
-      <p className="text-xs text-muted-foreground mb-4">Total outstanding ({currency || "—"})</p>
-      <div className="w-full h-[420px]">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-foreground">Top {count} customers by overdue</h2>
+          <p className="text-xs text-muted-foreground">Total outstanding ({currency || "—"})</p>
+        </div>
+        <Select value={String(count)} onValueChange={(value) => onCountChange(Number(value))}>
+          <SelectTrigger className="w-28" aria-label="Number of customers to display">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {[10, 20, 30, 50].map((option) => (
+              <SelectItem key={option} value={String(option)}>Top {option}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="w-full" style={{ height: Math.max(320, count * 22) }}>
         <ResponsiveContainer>
           <BarChart data={chartData} layout="vertical" margin={{ left: 8, right: 24 }}>
             <XAxis type="number" tick={{ fontSize: 11 }} />
@@ -570,12 +620,20 @@ function CustomerGroups({
   toggle,
   loading,
   currency,
+  statuses,
+  statusPendingId,
+  statusError,
+  onToggleStatus,
 }: {
-  groups: { code: string; name: string; invoices: OverdueInvoice[]; total: number }[];
+  groups: { customerId: number | null; code: string; name: string; invoices: OverdueInvoice[]; total: number }[];
   expanded: Record<string, boolean>;
   toggle: (k: string) => void;
   loading: boolean;
   currency: string;
+  statuses: Record<number, 0 | 3>;
+  statusPendingId: number | undefined;
+  statusError: string | null;
+  onToggleStatus: (customerId: number) => void;
 }) {
   if (loading) {
     return (
@@ -595,33 +653,52 @@ function CustomerGroups({
     <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
       <div className="px-5 py-3 border-b border-border bg-muted/40">
         <h2 className="text-base font-semibold text-foreground">Overdue by customer</h2>
-        <p className="text-xs text-muted-foreground">Click a customer to expand invoices. Click an invoice to open in N3.</p>
+        <p className="text-xs text-muted-foreground">Expand invoices, manage customer status, or start a payment in N3.</p>
+        {statusError && <p role="alert" className="mt-2 text-xs text-destructive">{statusError}</p>}
       </div>
       <ul className="divide-y divide-border">
         {groups.map((g, idx) => {
           const key = g.code || g.name;
           const open = !!expanded[key];
           const accent = PALETTE[idx % PALETTE.length];
+          const suspended = g.customerId !== null && statuses[g.customerId] === 3;
           return (
             <li key={key}>
-              <button
-                onClick={() => toggle(key)}
-                className="w-full flex items-center gap-3 px-5 py-3 text-left hover:bg-accent/40"
-              >
+              <div className="flex flex-wrap items-center gap-3 px-5 py-3 hover:bg-accent/40">
                 <span
                   className="inline-block h-2.5 w-2.5 rounded-full"
                   style={{ backgroundColor: accent }}
                 />
-                <span className="flex-1">
+                <Button variant="ghost" className="h-auto min-w-0 flex-1 justify-start px-0 py-0 text-left hover:bg-transparent" onClick={() => toggle(key)}>
+                  <span className="min-w-0 flex-1">
                   <span className="font-medium text-foreground">{g.name || "(no name)"}</span>
                   <span className="ml-2 text-xs text-muted-foreground">{g.code}</span>
-                </span>
+                  </span>
+                  <span className={`text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`}>›</span>
+                </Button>
                 <span className="text-xs text-muted-foreground">{g.invoices.length} inv</span>
                 <span className="w-40 text-right tabular-nums font-semibold text-foreground">
                   {fmtMoney(g.total, g.invoices[0]?.currencyCode || currency)}
                 </span>
-                <span className={`ml-2 text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`}>›</span>
-              </button>
+                <Button
+                  size="sm"
+                  variant={suspended ? "secondary" : "destructive"}
+                  disabled={g.customerId === null || statusPendingId === g.customerId}
+                  onClick={() => g.customerId !== null && onToggleStatus(g.customerId)}
+                  title={g.customerId === null ? "Customer ID is unavailable" : undefined}
+                >
+                  {statusPendingId === g.customerId ? "Updating…" : suspended ? "Activate" : "Suspend"}
+                </Button>
+                <Button size="sm" variant="outline" asChild={g.customerId !== null} disabled={g.customerId === null}>
+                  {g.customerId !== null ? (
+                    <a href={N3_RECEIVE_PAYMENT_URL(g.customerId)} target="_blank" rel="noopener noreferrer">
+                      Receive payment ↗
+                    </a>
+                  ) : (
+                    <span>Receive payment</span>
+                  )}
+                </Button>
+              </div>
               {open && (
                 <div className="overflow-x-auto bg-muted/20">
                   <table className="w-full text-sm">
