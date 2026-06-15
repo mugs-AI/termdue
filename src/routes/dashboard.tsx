@@ -679,9 +679,9 @@ function TopCustomersChart({
           </SelectContent>
         </Select>
       </div>
-      <div className="w-full" style={{ height: Math.max(320, count * 22) }}>
+      <div className="w-full" style={{ height: Math.max(320, count * 26) }}>
         <ResponsiveContainer>
-          <BarChart data={chartData} layout="vertical" margin={{ left: 8, right: 24 }}>
+          <BarChart data={chartData} layout="vertical" margin={{ left: 8, right: 60, top: 4, bottom: 4 }}>
             <XAxis type="number" tick={{ fontSize: 11 }} />
             <YAxis dataKey="name" type="category" width={170} tick={{ fontSize: 11 }} />
             <Tooltip
@@ -692,6 +692,19 @@ function TopCustomersChart({
               {chartData.map((_, i) => (
                 <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
               ))}
+              <LabelList
+                dataKey="name"
+                position="insideLeft"
+                fill="#ffffff"
+                fontSize={11}
+                style={{ pointerEvents: "none", fontWeight: 600 }}
+              />
+              <LabelList
+                dataKey="total"
+                position="right"
+                fontSize={11}
+                formatter={(v: number) => fmtMoney(v, currency)}
+              />
             </Bar>
           </BarChart>
         </ResponsiveContainer>
