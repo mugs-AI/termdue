@@ -2,7 +2,7 @@ import { createFileRoute, useNavigate, useRouter } from "@tanstack/react-router"
 import { useEffect, useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LabelList } from "recharts";
 import {
   fetchOverdueInvoices,
   getAiInsights,
@@ -584,13 +584,18 @@ function AiInsights({
   error: string | null;
   disabled: boolean;
 }) {
+  const [index, setIndex] = useState(0);
+  useEffect(() => {
+    setIndex(0);
+  }, [tips]);
+  const total = tips?.length ?? 0;
   return (
     <div className="rounded-xl border border-border bg-gradient-to-br from-violet-500/10 via-card to-pink-500/10 p-5 shadow-sm">
-      <div className="flex items-center justify-between gap-3">
-        <div>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
           <h2 className="text-base font-semibold text-foreground">AI Insight Tips</h2>
           <p className="text-xs text-muted-foreground">
-            Powered by AI — reviews your current overdue snapshot.
+            5 quick, actionable tips from your overdue snapshot.
           </p>
         </div>
         <button
@@ -598,22 +603,39 @@ function AiInsights({
           disabled={disabled || loading}
           className="rounded-md bg-gradient-to-r from-violet-500 to-fuchsia-500 px-4 py-1.5 text-sm font-medium text-white hover:opacity-90 disabled:opacity-60"
         >
-          {loading ? "Thinking…" : tips ? "Regenerate" : "Generate insights"}
+          {loading ? "Thinking…" : tips ? "Regenerate" : "Generate"}
         </button>
       </div>
       {error && <div className="mt-3 text-sm text-destructive">{error}</div>}
-      {tips && tips.length > 0 && (
-        <ul className="mt-4 grid gap-2 sm:grid-cols-2">
-          {tips.map((t, i) => (
-            <li
-              key={i}
-              className="rounded-lg border border-border bg-card/70 p-3 text-sm text-foreground"
-            >
-              <span className="mr-2 text-violet-500">✦</span>
-              {t}
-            </li>
-          ))}
-        </ul>
+      {tips && total > 0 && (
+        <div className="mt-4">
+          <div className="rounded-lg border border-border bg-card/70 p-4 text-sm text-foreground min-h-[88px] flex items-start gap-2">
+            <span className="text-violet-500 shrink-0">✦</span>
+            <span className="min-w-0">{tips[index]}</span>
+          </div>
+          <div className="mt-3 flex items-center justify-between gap-3">
+            <span className="text-xs text-muted-foreground">
+              Tip {index + 1} of {total}
+            </span>
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setIndex((i) => Math.max(0, i - 1))}
+                disabled={index === 0}
+              >
+                Back
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => setIndex((i) => Math.min(total - 1, i + 1))}
+                disabled={index >= total - 1}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -657,9 +679,9 @@ function TopCustomersChart({
           </SelectContent>
         </Select>
       </div>
-      <div className="w-full" style={{ height: Math.max(320, count * 22) }}>
+      <div className="w-full" style={{ height: Math.max(320, count * 26) }}>
         <ResponsiveContainer>
-          <BarChart data={chartData} layout="vertical" margin={{ left: 8, right: 24 }}>
+          <BarChart data={chartData} layout="vertical" margin={{ left: 8, right: 60, top: 4, bottom: 4 }}>
             <XAxis type="number" tick={{ fontSize: 11 }} />
             <YAxis dataKey="name" type="category" width={170} tick={{ fontSize: 11 }} />
             <Tooltip
@@ -670,6 +692,19 @@ function TopCustomersChart({
               {chartData.map((_, i) => (
                 <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
               ))}
+              <LabelList
+                dataKey="name"
+                position="insideLeft"
+                fill="#ffffff"
+                fontSize={11}
+                style={{ pointerEvents: "none", fontWeight: 600 }}
+              />
+              <LabelList
+                dataKey="total"
+                position="right"
+                fontSize={11}
+                formatter={(v: number) => fmtMoney(v, currency)}
+              />
             </Bar>
           </BarChart>
         </ResponsiveContainer>
@@ -744,61 +779,69 @@ function CustomerGroups({
             (statusOverrides[g.customerId] ?? statuses[String(g.customerId)]) === 3;
           return (
             <li key={key}>
-              <div className="flex flex-wrap items-center gap-3 px-5 py-3 hover:bg-accent/40">
-                <span
-                  className="inline-block h-2.5 w-2.5 rounded-full"
-                  style={{ backgroundColor: accent }}
-                />
-                <Button
-                  variant="ghost"
-                  className="h-auto min-w-0 flex-1 justify-start px-0 py-0 text-left hover:bg-transparent"
-                  onClick={() => toggle(key)}
-                >
-                  <span className="min-w-0 flex-1">
-                    <span className="font-medium text-foreground">{g.name || "(no name)"}</span>
-                    <span className="ml-2 text-xs text-muted-foreground">{g.code}</span>
-                  </span>
+              <div className="px-5 py-3 hover:bg-accent/40">
+                <div className="flex items-center gap-3">
                   <span
-                    className={`text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`}
+                    className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: accent }}
+                  />
+                  <Button
+                    variant="ghost"
+                    className="h-auto min-w-0 flex-1 justify-start px-0 py-0 text-left hover:bg-transparent"
+                    onClick={() => toggle(key)}
                   >
-                    ›
-                  </span>
-                </Button>
-                <span className="text-xs text-muted-foreground">{g.invoices.length} inv</span>
-                <span className="w-40 text-right tabular-nums font-semibold text-foreground">
-                  {fmtMoney(g.total, g.invoices[0]?.currencyCode || currency)}
-                </span>
-                <Button
-                  size="sm"
-                  variant={suspended ? "secondary" : "destructive"}
-                  disabled={g.customerId === null || statusPendingId === g.customerId}
-                  onClick={() => g.customerId !== null && onToggleStatus(g.customerId)}
-                  title={g.customerId === null ? "Customer ID is unavailable" : undefined}
-                >
-                  {statusPendingId === g.customerId
-                    ? "Updating…"
-                    : suspended
-                      ? "Activate"
-                      : "Suspend"}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  asChild={g.customerId !== null}
-                  disabled={g.customerId === null}
-                >
-                  {g.customerId !== null ? (
-                    <a
-                      href={N3_RECEIVE_PAYMENT_URL(g.customerId)}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                    <span className="min-w-0 flex-1 truncate">
+                      <span className="font-medium text-foreground">{g.name || "(no name)"}</span>
+                      <span className="ml-2 text-xs text-muted-foreground">{g.code}</span>
+                    </span>
+                    <span
+                      className={`shrink-0 text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`}
                     >
-                      Receive payment ↗
-                    </a>
-                  ) : (
-                    <span>Receive payment</span>
-                  )}
-                </Button>
+                      ›
+                    </span>
+                  </Button>
+                </div>
+                <div className="mt-2 flex flex-wrap items-center justify-between gap-2 pl-[22px]">
+                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                    <span>{g.invoices.length} inv</span>
+                    <span className="tabular-nums font-semibold text-foreground">
+                      {fmtMoney(g.total, g.invoices[0]?.currencyCode || currency)}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant={suspended ? "secondary" : "destructive"}
+                      disabled={g.customerId === null || statusPendingId === g.customerId}
+                      onClick={() => g.customerId !== null && onToggleStatus(g.customerId)}
+                      title={g.customerId === null ? "Customer ID is unavailable" : undefined}
+                    >
+                      {statusPendingId === g.customerId
+                        ? "Updating…"
+                        : suspended
+                          ? "Activate"
+                          : "Suspend"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      asChild={g.customerId !== null}
+                      disabled={g.customerId === null}
+                    >
+                      {g.customerId !== null ? (
+                        <a
+                          href={N3_RECEIVE_PAYMENT_URL(g.customerId)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          Receive payment ↗
+                        </a>
+                      ) : (
+                        <span>Receive payment</span>
+                      )}
+                    </Button>
+                  </div>
+                </div>
               </div>
               {open && (
                 <div className="overflow-x-auto bg-muted/20">
