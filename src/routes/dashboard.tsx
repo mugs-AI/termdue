@@ -584,13 +584,18 @@ function AiInsights({
   error: string | null;
   disabled: boolean;
 }) {
+  const [index, setIndex] = useState(0);
+  useEffect(() => {
+    setIndex(0);
+  }, [tips]);
+  const total = tips?.length ?? 0;
   return (
     <div className="rounded-xl border border-border bg-gradient-to-br from-violet-500/10 via-card to-pink-500/10 p-5 shadow-sm">
-      <div className="flex items-center justify-between gap-3">
-        <div>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
           <h2 className="text-base font-semibold text-foreground">AI Insight Tips</h2>
           <p className="text-xs text-muted-foreground">
-            Powered by AI — reviews your current overdue snapshot.
+            5 quick, actionable tips from your overdue snapshot.
           </p>
         </div>
         <button
@@ -598,22 +603,39 @@ function AiInsights({
           disabled={disabled || loading}
           className="rounded-md bg-gradient-to-r from-violet-500 to-fuchsia-500 px-4 py-1.5 text-sm font-medium text-white hover:opacity-90 disabled:opacity-60"
         >
-          {loading ? "Thinking…" : tips ? "Regenerate" : "Generate insights"}
+          {loading ? "Thinking…" : tips ? "Regenerate" : "Generate"}
         </button>
       </div>
       {error && <div className="mt-3 text-sm text-destructive">{error}</div>}
-      {tips && tips.length > 0 && (
-        <ul className="mt-4 grid gap-2 sm:grid-cols-2">
-          {tips.map((t, i) => (
-            <li
-              key={i}
-              className="rounded-lg border border-border bg-card/70 p-3 text-sm text-foreground"
-            >
-              <span className="mr-2 text-violet-500">✦</span>
-              {t}
-            </li>
-          ))}
-        </ul>
+      {tips && total > 0 && (
+        <div className="mt-4">
+          <div className="rounded-lg border border-border bg-card/70 p-4 text-sm text-foreground min-h-[88px] flex items-start gap-2">
+            <span className="text-violet-500 shrink-0">✦</span>
+            <span className="min-w-0">{tips[index]}</span>
+          </div>
+          <div className="mt-3 flex items-center justify-between gap-3">
+            <span className="text-xs text-muted-foreground">
+              Tip {index + 1} of {total}
+            </span>
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setIndex((i) => Math.max(0, i - 1))}
+                disabled={index === 0}
+              >
+                Back
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => setIndex((i) => Math.min(total - 1, i + 1))}
+                disabled={index >= total - 1}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
