@@ -779,61 +779,69 @@ function CustomerGroups({
             (statusOverrides[g.customerId] ?? statuses[String(g.customerId)]) === 3;
           return (
             <li key={key}>
-              <div className="flex flex-wrap items-center gap-3 px-5 py-3 hover:bg-accent/40">
-                <span
-                  className="inline-block h-2.5 w-2.5 rounded-full"
-                  style={{ backgroundColor: accent }}
-                />
-                <Button
-                  variant="ghost"
-                  className="h-auto min-w-0 flex-1 justify-start px-0 py-0 text-left hover:bg-transparent"
-                  onClick={() => toggle(key)}
-                >
-                  <span className="min-w-0 flex-1">
-                    <span className="font-medium text-foreground">{g.name || "(no name)"}</span>
-                    <span className="ml-2 text-xs text-muted-foreground">{g.code}</span>
-                  </span>
+              <div className="px-5 py-3 hover:bg-accent/40">
+                <div className="flex items-center gap-3">
                   <span
-                    className={`text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`}
+                    className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: accent }}
+                  />
+                  <Button
+                    variant="ghost"
+                    className="h-auto min-w-0 flex-1 justify-start px-0 py-0 text-left hover:bg-transparent"
+                    onClick={() => toggle(key)}
                   >
-                    ›
-                  </span>
-                </Button>
-                <span className="text-xs text-muted-foreground">{g.invoices.length} inv</span>
-                <span className="w-40 text-right tabular-nums font-semibold text-foreground">
-                  {fmtMoney(g.total, g.invoices[0]?.currencyCode || currency)}
-                </span>
-                <Button
-                  size="sm"
-                  variant={suspended ? "secondary" : "destructive"}
-                  disabled={g.customerId === null || statusPendingId === g.customerId}
-                  onClick={() => g.customerId !== null && onToggleStatus(g.customerId)}
-                  title={g.customerId === null ? "Customer ID is unavailable" : undefined}
-                >
-                  {statusPendingId === g.customerId
-                    ? "Updating…"
-                    : suspended
-                      ? "Activate"
-                      : "Suspend"}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  asChild={g.customerId !== null}
-                  disabled={g.customerId === null}
-                >
-                  {g.customerId !== null ? (
-                    <a
-                      href={N3_RECEIVE_PAYMENT_URL(g.customerId)}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                    <span className="min-w-0 flex-1 truncate">
+                      <span className="font-medium text-foreground">{g.name || "(no name)"}</span>
+                      <span className="ml-2 text-xs text-muted-foreground">{g.code}</span>
+                    </span>
+                    <span
+                      className={`shrink-0 text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`}
                     >
-                      Receive payment ↗
-                    </a>
-                  ) : (
-                    <span>Receive payment</span>
-                  )}
-                </Button>
+                      ›
+                    </span>
+                  </Button>
+                </div>
+                <div className="mt-2 flex flex-wrap items-center justify-between gap-2 pl-[22px]">
+                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                    <span>{g.invoices.length} inv</span>
+                    <span className="tabular-nums font-semibold text-foreground">
+                      {fmtMoney(g.total, g.invoices[0]?.currencyCode || currency)}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant={suspended ? "secondary" : "destructive"}
+                      disabled={g.customerId === null || statusPendingId === g.customerId}
+                      onClick={() => g.customerId !== null && onToggleStatus(g.customerId)}
+                      title={g.customerId === null ? "Customer ID is unavailable" : undefined}
+                    >
+                      {statusPendingId === g.customerId
+                        ? "Updating…"
+                        : suspended
+                          ? "Activate"
+                          : "Suspend"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      asChild={g.customerId !== null}
+                      disabled={g.customerId === null}
+                    >
+                      {g.customerId !== null ? (
+                        <a
+                          href={N3_RECEIVE_PAYMENT_URL(g.customerId)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          Receive payment ↗
+                        </a>
+                      ) : (
+                        <span>Receive payment</span>
+                      )}
+                    </Button>
+                  </div>
+                </div>
               </div>
               {open && (
                 <div className="overflow-x-auto bg-muted/20">
