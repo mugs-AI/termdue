@@ -843,6 +843,11 @@ function CustomerGroups({
             {statusError}
           </p>
         )}
+        {whatsappError && (
+          <p role="alert" className="mt-2 text-xs text-destructive">
+            WhatsApp: {whatsappError}
+          </p>
+        )}
       </div>
       <ul className="divide-y divide-border">
         {groups.map((g, idx) => {
