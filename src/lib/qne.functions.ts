@@ -330,3 +330,236 @@ export const getAiInsights = createServerFn({ method: "POST" })
       .slice(0, 5);
     return { tips };
   });
+
+const WhatsappSchema = z.object({
+  token: z.string().min(20),
+  customerId: z.number().int().positive(),
+  customerName: z.string(),
+  customerCode: z.string(),
+  companyName: z.string().optional().default(""),
+  currency: z.string().optional().default(""),
+  invoices: z.array(
+    z.object({
+      docCode: z.string(),
+      refNo: z.string().optional().default(""),
+      docDate: z.string().optional().default(""),
+      dueDate: z.string().nullable().optional(),
+      outstandingAmount: z.number(),
+      daysOverdue: z.number(),
+    }),
+  ),
+});
+
+function sanitizePhone(raw: string): string {
+  const digits = (raw || "").replace(/[^\d]/g, "");
+  // Strip leading zeros so wa.me gets country-code+number.
+  return digits.replace(/^0+/, "");
+}
+
+async function shortenUrl(longUrl: string): Promise<string> {
+  try {
+    const res = await fetch(
+      `https://is.gd/create.php?format=simple&url=${encodeURIComponent(longUrl)}`,
+    );
+    if (!res.ok) return longUrl;
+    const text = (await res.text()).trim();
+    if (text.startsWith("http")) return text;
+    return longUrl;
+  } catch {
+    return longUrl;
+  }
+}
+
+async function buildStatementPdf(opts: {
+  companyName: string;
+  customerName: string;
+  customerCode: string;
+  currency: string;
+  invoices: Array<{
+    docCode: string;
+    refNo: string;
+    docDate: string;
+    dueDate: string | null | undefined;
+    outstandingAmount: number;
+    daysOverdue: number;
+  }>;
+}): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const page = doc.addPage([595, 842]); // A4 portrait
+  const { width, height } = page.getSize();
+
+  const margin = 40;
+  let y = height - margin;
+  const draw = (
+    text: string,
+    x: number,
+    yy: number,
+    size = 10,
+    f = font,
+    color = rgb(0, 0, 0),
+  ) => page.drawText(text, { x, y: yy, size, font: f, color });
+
+  draw(opts.companyName || "Overdue Statement", margin, y, 16, bold);
+  y -= 22;
+  draw("Statement of Overdue Invoices", margin, y, 12, bold, rgb(0.3, 0.3, 0.3));
+  y -= 22;
+  draw(`Customer: ${opts.customerName} (${opts.customerCode})`, margin, y, 11, bold);
+  y -= 14;
+  draw(`Generated: ${new Date().toLocaleString()}`, margin, y, 9, font, rgb(0.4, 0.4, 0.4));
+  y -= 22;
+
+  // Header row
+  const cols = [
+    { label: "Invoice", x: margin, w: 90 },
+    { label: "Ref No", x: margin + 95, w: 80 },
+    { label: "Date", x: margin + 180, w: 65 },
+    { label: "Due", x: margin + 250, w: 65 },
+    { label: "Days", x: margin + 320, w: 40 },
+    { label: "Outstanding", x: margin + 420, w: 95 },
+  ];
+  page.drawRectangle({
+    x: margin - 4,
+    y: y - 4,
+    width: width - margin * 2 + 8,
+    height: 18,
+    color: rgb(0.93, 0.93, 0.96),
+  });
+  for (const c of cols) draw(c.label, c.x, y, 9, bold);
+  y -= 18;
+
+  const fmt = (n: number) =>
+    new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(
+      n,
+    );
+
+  let total = 0;
+  for (const inv of opts.invoices) {
+    if (y < margin + 40) {
+      const np = doc.addPage([595, 842]);
+      y = np.getSize().height - margin;
+    }
+    draw(inv.docCode || "—", cols[0].x, y, 9);
+    draw((inv.refNo || "").slice(0, 14), cols[1].x, y, 9);
+    draw(inv.docDate || "", cols[2].x, y, 9);
+    draw(inv.dueDate || "", cols[3].x, y, 9);
+    draw(String(inv.daysOverdue), cols[4].x, y, 9);
+    const amt = fmt(inv.outstandingAmount);
+    const amtWidth = font.widthOfTextAtSize(amt, 9);
+    draw(amt, cols[5].x + cols[5].w - amtWidth, y, 9);
+    total += inv.outstandingAmount;
+    y -= 14;
+  }
+
+  y -= 8;
+  page.drawLine({
+    start: { x: margin, y },
+    end: { x: width - margin, y },
+    thickness: 0.5,
+    color: rgb(0.6, 0.6, 0.6),
+  });
+  y -= 16;
+  const totalLabel = `Total Outstanding (${opts.currency || ""})`;
+  draw(totalLabel, cols[0].x, y, 11, bold);
+  const totalStr = fmt(total);
+  const totalWidth = bold.widthOfTextAtSize(totalStr, 11);
+  draw(totalStr, cols[5].x + cols[5].w - totalWidth, y, 11, bold);
+
+  y -= 28;
+  draw(
+    "Kindly arrange payment for the above outstanding invoices at your earliest convenience.",
+    margin,
+    y,
+    9,
+    font,
+    rgb(0.35, 0.35, 0.35),
+  );
+  y -= 12;
+  draw("Thank you for your prompt attention.", margin, y, 9, font, rgb(0.35, 0.35, 0.35));
+
+  return await doc.save();
+}
+
+export const sendOverdueViaWhatsApp = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown) => WhatsappSchema.parse(input))
+  .handler(
+    async ({
+      data,
+    }): Promise<{ phone: string; shortUrl: string; longUrl: string; customerName: string }> => {
+      const headers = { Authorization: `Bearer ${data.token}` };
+
+      // 1. Fetch customer for phone number.
+      const customerRes = await fetch(`${QNE_BASE}/api/Customers/${data.customerId}`, { headers });
+      if (customerRes.status === 401) throw new QneUnauthorizedError();
+      if (!customerRes.ok)
+        throw new Error(`Unable to load QNE customer (${customerRes.status}).`);
+      const customerBody = (await customerRes.json()) as {
+        code?: string;
+        message?: string;
+        data?: Record<string, unknown>;
+      };
+      if (customerBody.code !== "0000" || !customerBody.data)
+        throw new Error(customerBody.message || "Customer not found in QNE.");
+
+      const c = customerBody.data;
+      const rawPhone = String(
+        (c.mobilePhone as string) ||
+          (c.mobile as string) ||
+          (c.phone1 as string) ||
+          (c.phone as string) ||
+          (c.phoneNo as string) ||
+          "",
+      );
+      const phone = sanitizePhone(rawPhone);
+      if (!phone)
+        throw new Error(
+          "This customer has no phone number in QNE. Add a mobile/phone1 in Customer Maintenance.",
+        );
+
+      // 2. Generate PDF statement.
+      const pdfBytes = await buildStatementPdf({
+        companyName: data.companyName,
+        customerName: data.customerName,
+        customerCode: data.customerCode,
+        currency: data.currency,
+        invoices: data.invoices.map((i) => ({
+          docCode: i.docCode,
+          refNo: i.refNo,
+          docDate: i.docDate,
+          dueDate: i.dueDate ?? null,
+          outstandingAmount: i.outstandingAmount,
+          daysOverdue: i.daysOverdue,
+        })),
+      });
+
+      // 3. Upload to Lovable Cloud storage.
+      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+      const safeCode = (data.customerCode || String(data.customerId)).replace(/[^A-Za-z0-9_-]/g, "_");
+      const objectPath = `${safeCode}/overdue-${Date.now()}.pdf`;
+      const { error: uploadErr } = await supabaseAdmin.storage
+        .from("overdue-statements")
+        .upload(objectPath, pdfBytes, {
+          contentType: "application/pdf",
+          upsert: true,
+        });
+      if (uploadErr) throw new Error(`Storage upload failed: ${uploadErr.message}`);
+
+      // 4. Long-lived signed URL (1 year).
+      const { data: signed, error: signedErr } = await supabaseAdmin.storage
+        .from("overdue-statements")
+        .createSignedUrl(objectPath, 60 * 60 * 24 * 365);
+      if (signedErr || !signed?.signedUrl)
+        throw new Error(`Could not sign URL: ${signedErr?.message || "unknown"}`);
+
+      // 5. Shorten via is.gd.
+      const shortUrl = await shortenUrl(signed.signedUrl);
+
+      return {
+        phone,
+        shortUrl,
+        longUrl: signed.signedUrl,
+        customerName: data.customerName,
+      };
+    },
+  );
