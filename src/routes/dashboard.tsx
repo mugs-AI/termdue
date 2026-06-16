@@ -95,6 +95,7 @@ function DashboardPage() {
   const exchangeFn = useServerFn(exchangeApiKey);
   const refreshFn = useServerFn(refreshSession);
   const toggleCustomerFn = useServerFn(toggleCustomerSuspension);
+  const whatsappFn = useServerFn(sendOverdueViaWhatsApp);
 
   const [token, setToken] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
