@@ -779,6 +779,14 @@ function TopCustomersChart({
   );
 }
 
+type CustomerGroup = {
+  customerId: number | null;
+  code: string;
+  name: string;
+  invoices: OverdueInvoice[];
+  total: number;
+};
+
 function CustomerGroups({
   groups,
   expanded,
@@ -790,14 +798,11 @@ function CustomerGroups({
   statusPendingId,
   statusError,
   onToggleStatus,
+  whatsappPendingId,
+  whatsappError,
+  onSendWhatsapp,
 }: {
-  groups: {
-    customerId: number | null;
-    code: string;
-    name: string;
-    invoices: OverdueInvoice[];
-    total: number;
-  }[];
+  groups: CustomerGroup[];
   expanded: Record<string, boolean>;
   toggle: (k: string) => void;
   loading: boolean;
@@ -807,6 +812,10 @@ function CustomerGroups({
   statusPendingId: number | undefined;
   statusError: string | null;
   onToggleStatus: (customerId: number) => void;
+  companyName: string;
+  whatsappPendingId: number | null;
+  whatsappError: string | null;
+  onSendWhatsapp: (g: CustomerGroup) => void;
 }) {
   if (loading) {
     return (
