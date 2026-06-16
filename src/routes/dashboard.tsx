@@ -462,6 +462,21 @@ function DashboardPage() {
             customerStatusMutation.isError ? (customerStatusMutation.error as Error).message : null
           }
           onToggleStatus={(customerId) => customerStatusMutation.mutate(customerId)}
+          companyName={data?.companyName ?? ""}
+          whatsappPendingId={whatsappPendingId}
+          whatsappError={
+            whatsappMutation.isError ? (whatsappMutation.error as Error).message : null
+          }
+          onSendWhatsapp={(g) =>
+            whatsappMutation.mutate({
+              customerId: g.customerId as number,
+              customerCode: g.code,
+              customerName: g.name,
+              currency: g.invoices[0]?.currencyCode || data?.currency || "",
+              companyName: data?.companyName ?? "",
+              invoices: g.invoices,
+            })
+          }
         />
       </section>
     </main>
