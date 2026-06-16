@@ -503,18 +503,31 @@ export const sendOverdueViaWhatsApp = createServerFn({ method: "POST" })
         throw new Error(customerBody.message || "Customer not found in QNE.");
 
       const c = customerBody.data;
-      const rawPhone = String(
-        (c.mobilePhone as string) ||
-          (c.mobile as string) ||
-          (c.phone1 as string) ||
-          (c.phone as string) ||
-          (c.phoneNo as string) ||
-          "",
+      // Case-insensitive lookup across possible QNE field names.
+      const pickField = (...names: string[]): string => {
+        const lowerMap: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(c)) lowerMap[k.toLowerCase()] = v;
+        for (const n of names) {
+          const v = lowerMap[n.toLowerCase()];
+          if (v != null && String(v).trim() !== "") return String(v);
+        }
+        return "";
+      };
+      const rawPhone = pickField(
+        "whatsApp",
+        "whatsAppNo",
+        "whatsapp",
+        "mobilePhone",
+        "mobile",
+        "phone1",
+        "phone",
+        "phoneNo",
+        "phone2",
       );
       const phone = sanitizePhone(rawPhone);
       if (!phone)
         throw new Error(
-          "This customer has no phone number in QNE. Add a mobile/phone1 in Customer Maintenance.",
+          "This customer has no phone number in QNE. Add a WhatsApp No. or Phone 1 in Customer Maintenance.",
         );
 
       // 2. Generate PDF statement.
