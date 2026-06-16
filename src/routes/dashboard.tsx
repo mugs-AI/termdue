@@ -9,6 +9,7 @@ import {
   exchangeApiKey,
   refreshSession,
   toggleCustomerSuspension,
+  sendOverdueViaWhatsApp,
   type OverdueInvoice,
   type OverdueResult,
 } from "@/lib/qne.functions";
@@ -94,6 +95,7 @@ function DashboardPage() {
   const exchangeFn = useServerFn(exchangeApiKey);
   const refreshFn = useServerFn(refreshSession);
   const toggleCustomerFn = useServerFn(toggleCustomerSuspension);
+  const whatsappFn = useServerFn(sendOverdueViaWhatsApp);
 
   const [token, setToken] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -168,6 +170,55 @@ function DashboardPage() {
       setCustomerStatusOverrides((current) => ({ ...current, [customerId]: status }));
     },
   });
+
+  const [whatsappPendingId, setWhatsappPendingId] = useState<number | null>(null);
+  const whatsappMutation = useMutation({
+    mutationFn: async (vars: {
+      customerId: number;
+      customerCode: string;
+      customerName: string;
+      currency: string;
+      companyName: string;
+      invoices: OverdueInvoice[];
+    }) => {
+      const current = token ?? sessionStorage.getItem("qne_jwt");
+      if (!current) throw new Error("Not signed in");
+      const payload = {
+        token: current,
+        customerId: vars.customerId,
+        customerCode: vars.customerCode,
+        customerName: vars.customerName,
+        currency: vars.currency,
+        companyName: vars.companyName,
+        invoices: vars.invoices.map((i) => ({
+          docCode: i.docCode,
+          refNo: i.refNo,
+          docDate: i.docDate,
+          dueDate: i.dueDate,
+          outstandingAmount: i.outstandingAmount,
+          daysOverdue: i.daysOverdue,
+        })),
+      };
+      try {
+        return await whatsappFn({ data: payload });
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        if (!/QneUnauthorized|session expired|401/i.test(msg)) throw error;
+        const { token: fresh } = await refreshFn({ data: { token: current } });
+        sessionStorage.setItem("qne_jwt", fresh);
+        setToken(fresh);
+        return whatsappFn({ data: { ...payload, token: fresh } });
+      }
+    },
+    onMutate: (vars) => setWhatsappPendingId(vars.customerId),
+    onSettled: () => setWhatsappPendingId(null),
+    onSuccess: ({ phone, shortUrl, customerName }) => {
+      const msg = `Hi ${customerName}, here is your overdue invoices statement: ${shortUrl}\n\nKindly arrange payment at your earliest convenience. Thank you.`;
+      const url = `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
+      window.open(url, "_blank", "noopener,noreferrer");
+    },
+  });
+
 
   // Bootstrap: accept a JWT directly from N3 (`?token=...`), fall back to an
   // API key in the URL or sessionStorage (which we exchange once for a JWT),
@@ -411,6 +462,21 @@ function DashboardPage() {
             customerStatusMutation.isError ? (customerStatusMutation.error as Error).message : null
           }
           onToggleStatus={(customerId) => customerStatusMutation.mutate(customerId)}
+          companyName={data?.companyName ?? ""}
+          whatsappPendingId={whatsappPendingId}
+          whatsappError={
+            whatsappMutation.isError ? (whatsappMutation.error as Error).message : null
+          }
+          onSendWhatsapp={(g) =>
+            whatsappMutation.mutate({
+              customerId: g.customerId as number,
+              customerCode: g.code,
+              customerName: g.name,
+              currency: g.invoices[0]?.currencyCode || data?.currency || "",
+              companyName: data?.companyName ?? "",
+              invoices: g.invoices,
+            })
+          }
         />
       </section>
     </main>
@@ -713,6 +779,14 @@ function TopCustomersChart({
   );
 }
 
+type CustomerGroup = {
+  customerId: number | null;
+  code: string;
+  name: string;
+  invoices: OverdueInvoice[];
+  total: number;
+};
+
 function CustomerGroups({
   groups,
   expanded,
@@ -724,14 +798,11 @@ function CustomerGroups({
   statusPendingId,
   statusError,
   onToggleStatus,
+  whatsappPendingId,
+  whatsappError,
+  onSendWhatsapp,
 }: {
-  groups: {
-    customerId: number | null;
-    code: string;
-    name: string;
-    invoices: OverdueInvoice[];
-    total: number;
-  }[];
+  groups: CustomerGroup[];
   expanded: Record<string, boolean>;
   toggle: (k: string) => void;
   loading: boolean;
@@ -741,6 +812,10 @@ function CustomerGroups({
   statusPendingId: number | undefined;
   statusError: string | null;
   onToggleStatus: (customerId: number) => void;
+  companyName: string;
+  whatsappPendingId: number | null;
+  whatsappError: string | null;
+  onSendWhatsapp: (g: CustomerGroup) => void;
 }) {
   if (loading) {
     return (
@@ -766,6 +841,11 @@ function CustomerGroups({
         {statusError && (
           <p role="alert" className="mt-2 text-xs text-destructive">
             {statusError}
+          </p>
+        )}
+        {whatsappError && (
+          <p role="alert" className="mt-2 text-xs text-destructive">
+            WhatsApp: {whatsappError}
           </p>
         )}
       </div>
@@ -839,6 +919,20 @@ function CustomerGroups({
                       ) : (
                         <span>Receive payment</span>
                       )}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="bg-[#25D366] text-white hover:bg-[#1eb957] hover:text-white border-transparent"
+                      disabled={g.customerId === null || whatsappPendingId === g.customerId}
+                      onClick={() => onSendWhatsapp(g)}
+                      title={
+                        g.customerId === null
+                          ? "Customer ID unavailable"
+                          : "Generate PDF & send via WhatsApp"
+                      }
+                    >
+                      {whatsappPendingId === g.customerId ? "Preparing…" : "WhatsApp"}
                     </Button>
                   </div>
                 </div>
