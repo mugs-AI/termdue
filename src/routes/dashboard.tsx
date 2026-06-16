@@ -920,6 +920,20 @@ function CustomerGroups({
                         <span>Receive payment</span>
                       )}
                     </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="bg-[#25D366] text-white hover:bg-[#1eb957] hover:text-white border-transparent"
+                      disabled={g.customerId === null || whatsappPendingId === g.customerId}
+                      onClick={() => onSendWhatsapp(g)}
+                      title={
+                        g.customerId === null
+                          ? "Customer ID unavailable"
+                          : "Generate PDF & send via WhatsApp"
+                      }
+                    >
+                      {whatsappPendingId === g.customerId ? "Preparing…" : "WhatsApp"}
+                    </Button>
                   </div>
                 </div>
               </div>
