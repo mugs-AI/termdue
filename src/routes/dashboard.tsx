@@ -171,6 +171,55 @@ function DashboardPage() {
     },
   });
 
+  const [whatsappPendingId, setWhatsappPendingId] = useState<number | null>(null);
+  const whatsappMutation = useMutation({
+    mutationFn: async (vars: {
+      customerId: number;
+      customerCode: string;
+      customerName: string;
+      currency: string;
+      companyName: string;
+      invoices: OverdueInvoice[];
+    }) => {
+      const current = token ?? sessionStorage.getItem("qne_jwt");
+      if (!current) throw new Error("Not signed in");
+      const payload = {
+        token: current,
+        customerId: vars.customerId,
+        customerCode: vars.customerCode,
+        customerName: vars.customerName,
+        currency: vars.currency,
+        companyName: vars.companyName,
+        invoices: vars.invoices.map((i) => ({
+          docCode: i.docCode,
+          refNo: i.refNo,
+          docDate: i.docDate,
+          dueDate: i.dueDate,
+          outstandingAmount: i.outstandingAmount,
+          daysOverdue: i.daysOverdue,
+        })),
+      };
+      try {
+        return await whatsappFn({ data: payload });
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        if (!/QneUnauthorized|session expired|401/i.test(msg)) throw error;
+        const { token: fresh } = await refreshFn({ data: { token: current } });
+        sessionStorage.setItem("qne_jwt", fresh);
+        setToken(fresh);
+        return whatsappFn({ data: { ...payload, token: fresh } });
+      }
+    },
+    onMutate: (vars) => setWhatsappPendingId(vars.customerId),
+    onSettled: () => setWhatsappPendingId(null),
+    onSuccess: ({ phone, shortUrl, customerName }) => {
+      const msg = `Hi ${customerName}, here is your overdue invoices statement: ${shortUrl}\n\nKindly arrange payment at your earliest convenience. Thank you.`;
+      const url = `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
+      window.open(url, "_blank", "noopener,noreferrer");
+    },
+  });
+
+
   // Bootstrap: accept a JWT directly from N3 (`?token=...`), fall back to an
   // API key in the URL or sessionStorage (which we exchange once for a JWT),
   // then use the JWT for every subsequent call.
