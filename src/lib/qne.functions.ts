@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 
 const QNE_BASE = "https://openapi.account.qne.cloud";
 
