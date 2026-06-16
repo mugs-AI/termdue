@@ -1,0 +1,4 @@
+CREATE POLICY "Deny client access to overdue-statements (select)" ON storage.objects FOR SELECT TO authenticated, anon USING (bucket_id <> 'overdue-statements');
+CREATE POLICY "Deny client access to overdue-statements (insert)" ON storage.objects FOR INSERT TO authenticated, anon WITH CHECK (bucket_id <> 'overdue-statements');
+CREATE POLICY "Deny client access to overdue-statements (update)" ON storage.objects FOR UPDATE TO authenticated, anon USING (bucket_id <> 'overdue-statements') WITH CHECK (bucket_id <> 'overdue-statements');
+CREATE POLICY "Deny client access to overdue-statements (delete)" ON storage.objects FOR DELETE TO authenticated, anon USING (bucket_id <> 'overdue-statements');
