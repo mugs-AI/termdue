@@ -589,6 +589,7 @@ async function shortenUrl(longUrl: string): Promise<string> {
 }
 
 async function buildStatementPdf(opts: {
+  companyHeaderLines: string[];
   companyName: string;
   customerName: string;
   customerCode: string;
@@ -600,45 +601,55 @@ async function buildStatementPdf(opts: {
     dueDate: string | null | undefined;
     outstandingAmount: number;
     daysOverdue: number;
+    items: InvoiceItem[];
   }>;
 }): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
-  const page = doc.addPage([595, 842]); // A4 portrait
-  const { width, height } = page.getSize();
-
+  let page = doc.addPage([595, 842]); // A4 portrait
+  const pageSize = page.getSize();
+  const width = pageSize.width;
   const margin = 40;
-  let y = height - margin;
+  let y = pageSize.height - margin;
+
   const draw = (text: string, x: number, yy: number, size = 10, f = font, color = rgb(0, 0, 0)) =>
     page.drawText(text, { x, y: yy, size, font: f, color });
 
-  draw(opts.companyName || "Overdue Statement", margin, y, 16, bold);
-  y -= 22;
-  draw("Statement of Overdue Invoices", margin, y, 12, bold, rgb(0.3, 0.3, 0.3));
-  y -= 22;
-  draw(`Customer: ${opts.customerName} (${opts.customerCode})`, margin, y, 11, bold);
-  y -= 14;
-  draw(`Generated: ${new Date().toLocaleString()}`, margin, y, 9, font, rgb(0.4, 0.4, 0.4));
-  y -= 22;
+  const newPage = () => {
+    page = doc.addPage([595, 842]);
+    y = page.getSize().height - margin;
+  };
+  const ensure = (h: number) => {
+    if (y - h < margin) newPage();
+  };
 
-  // Header row
-  const cols = [
-    { label: "Invoice", x: margin, w: 90 },
-    { label: "Ref No", x: margin + 95, w: 80 },
-    { label: "Date", x: margin + 180, w: 65 },
-    { label: "Due", x: margin + 250, w: 65 },
-    { label: "Days", x: margin + 320, w: 40 },
-    { label: "Outstanding", x: margin + 420, w: 95 },
-  ];
-  page.drawRectangle({
-    x: margin - 4,
-    y: y - 4,
-    width: width - margin * 2 + 8,
-    height: 18,
-    color: rgb(0.93, 0.93, 0.96),
+  // Letterhead (from QNE Company Profile > Header)
+  if (opts.companyHeaderLines.length > 0) {
+    draw(opts.companyHeaderLines[0], margin, y, 14, bold);
+    y -= 18;
+    for (const line of opts.companyHeaderLines.slice(1)) {
+      draw(line, margin, y, 9, font, rgb(0.3, 0.3, 0.3));
+      y -= 12;
+    }
+  } else {
+    draw(opts.companyName || "Overdue Statement", margin, y, 16, bold);
+    y -= 22;
+  }
+  y -= 6;
+  page.drawLine({
+    start: { x: margin, y },
+    end: { x: width - margin, y },
+    thickness: 0.8,
+    color: rgb(0.2, 0.2, 0.2),
   });
-  for (const c of cols) draw(c.label, c.x, y, 9, bold);
+  y -= 14;
+
+  draw("Statement of Overdue Invoices", margin, y, 12, bold, rgb(0.2, 0.2, 0.2));
+  y -= 16;
+  draw(`Customer: ${opts.customerName} (${opts.customerCode})`, margin, y, 11, bold);
+  y -= 13;
+  draw(`Generated: ${new Date().toLocaleString()}`, margin, y, 9, font, rgb(0.45, 0.45, 0.45));
   y -= 18;
 
   const fmt = (n: number) =>
@@ -646,25 +657,65 @@ async function buildStatementPdf(opts: {
       n,
     );
 
-  let total = 0;
+  let grandTotal = 0;
   for (const inv of opts.invoices) {
-    if (y < margin + 40) {
-      const np = doc.addPage([595, 842]);
-      y = np.getSize().height - margin;
+    ensure(40);
+    // Invoice header band
+    page.drawRectangle({
+      x: margin - 4,
+      y: y - 4,
+      width: width - margin * 2 + 8,
+      height: 16,
+      color: rgb(0.93, 0.93, 0.96),
+    });
+    draw(`Invoice ${inv.docCode || "—"}`, margin, y, 10, bold);
+    draw(`Date: ${inv.docDate || ""}`, margin + 170, y, 9, bold);
+    draw(`Due: ${inv.dueDate || "—"}`, margin + 270, y, 9, bold);
+    draw(`Days: ${inv.daysOverdue}`, margin + 365, y, 9, bold);
+    const outStr = fmt(inv.outstandingAmount);
+    const outW = bold.widthOfTextAtSize(outStr, 10);
+    draw(outStr, width - margin - outW, y, 10, bold);
+    y -= 16;
+    if (inv.refNo) {
+      ensure(11);
+      draw(`Ref: ${inv.refNo}`, margin, y, 8, font, rgb(0.4, 0.4, 0.4));
+      y -= 11;
     }
-    draw(inv.docCode || "—", cols[0].x, y, 9);
-    draw((inv.refNo || "").slice(0, 14), cols[1].x, y, 9);
-    draw(inv.docDate || "", cols[2].x, y, 9);
-    draw(inv.dueDate || "", cols[3].x, y, 9);
-    draw(String(inv.daysOverdue), cols[4].x, y, 9);
-    const amt = fmt(inv.outstandingAmount);
-    const amtWidth = font.widthOfTextAtSize(amt, 9);
-    draw(amt, cols[5].x + cols[5].w - amtWidth, y, 9);
-    total += inv.outstandingAmount;
-    y -= 14;
+
+    // Item rows
+    if (inv.items.length) {
+      ensure(13);
+      draw("Item", margin + 4, y, 8, bold, rgb(0.35, 0.35, 0.35));
+      draw("Description", margin + 80, y, 8, bold, rgb(0.35, 0.35, 0.35));
+      draw("Qty", margin + 310, y, 8, bold, rgb(0.35, 0.35, 0.35));
+      draw("UOM", margin + 345, y, 8, bold, rgb(0.35, 0.35, 0.35));
+      draw("Price", margin + 390, y, 8, bold, rgb(0.35, 0.35, 0.35));
+      const amtHeader = "Amount";
+      const ahw = bold.widthOfTextAtSize(amtHeader, 8);
+      draw(amtHeader, width - margin - ahw, y, 8, bold, rgb(0.35, 0.35, 0.35));
+      y -= 11;
+      for (const it of inv.items) {
+        ensure(11);
+        draw((it.stockCode || "").slice(0, 14), margin + 4, y, 8);
+        draw((it.description || "").slice(0, 40), margin + 80, y, 8);
+        draw(it.qty ? String(it.qty) : "", margin + 310, y, 8);
+        draw((it.uom || "").slice(0, 6), margin + 345, y, 8);
+        draw(fmt(it.unitPrice), margin + 390, y, 8);
+        const am = fmt(it.amount);
+        const aw = font.widthOfTextAtSize(am, 8);
+        draw(am, width - margin - aw, y, 8);
+        y -= 11;
+      }
+    } else {
+      ensure(11);
+      draw("(no line items)", margin + 4, y, 8, font, rgb(0.55, 0.55, 0.55));
+      y -= 11;
+    }
+    y -= 10;
+    grandTotal += inv.outstandingAmount;
   }
 
-  y -= 8;
+  ensure(50);
   page.drawLine({
     start: { x: margin, y },
     end: { x: width - margin, y },
@@ -673,12 +724,13 @@ async function buildStatementPdf(opts: {
   });
   y -= 16;
   const totalLabel = `Total Outstanding (${opts.currency || ""})`;
-  draw(totalLabel, cols[0].x, y, 11, bold);
-  const totalStr = fmt(total);
+  draw(totalLabel, margin, y, 11, bold);
+  const totalStr = fmt(grandTotal);
   const totalWidth = bold.widthOfTextAtSize(totalStr, 11);
-  draw(totalStr, cols[5].x + cols[5].w - totalWidth, y, 11, bold);
+  draw(totalStr, width - margin - totalWidth, y, 11, bold);
 
-  y -= 28;
+  y -= 24;
+  ensure(24);
   draw(
     "Kindly arrange payment for the above outstanding invoices at your earliest convenience.",
     margin,
