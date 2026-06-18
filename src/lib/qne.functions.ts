@@ -455,6 +455,7 @@ const WhatsappSchema = z.object({
   currency: z.string().optional().default(""),
   invoices: z.array(
     z.object({
+      id: z.string().optional().default(""),
       docCode: z.string(),
       refNo: z.string().optional().default(""),
       docDate: z.string().optional().default(""),
