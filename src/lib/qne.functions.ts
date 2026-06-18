@@ -90,6 +90,121 @@ async function getCompanyName(jwt: string): Promise<string | undefined> {
   }
 }
 
+function htmlToLines(html: string): string[] {
+  if (!html) return [];
+  const text = html
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|h[1-6]|li|tr)>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&#39;/g, "'")
+    .replace(/&quot;/g, '"');
+  return text
+    .split("\n")
+    .map((l) => l.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+}
+
+async function fetchCompanyHeaderLines(jwt: string): Promise<string[]> {
+  try {
+    const res = await fetch(`${QNE_BASE}/api/companyprofile`, {
+      headers: { Authorization: `Bearer ${jwt}` },
+    });
+    if (!res.ok) return [];
+    const body = (await res.json()) as { data?: Record<string, unknown> };
+    const d = body.data || {};
+    const candidates = [
+      "header",
+      "headerHtml",
+      "headerHTML",
+      "reportHeader",
+      "letterHead",
+      "letterhead",
+    ];
+    let html = "";
+    for (const key of candidates) {
+      const v = d[key];
+      if (typeof v === "string" && v.trim()) {
+        html = v;
+        break;
+      }
+    }
+    if (!html) {
+      for (const v of Object.values(d)) {
+        if (typeof v === "string" && /<\w+[^>]*>/.test(v)) {
+          html = v;
+          break;
+        }
+      }
+    }
+    const lines = htmlToLines(html);
+    if (lines.length) return lines;
+    const name = (d.companyName as string) || (d.name as string) || "";
+    return name ? [name] : [];
+  } catch {
+    return [];
+  }
+}
+
+type InvoiceItem = {
+  stockCode: string;
+  description: string;
+  qty: number;
+  uom: string;
+  unitPrice: number;
+  amount: number;
+};
+
+async function fetchInvoiceItems(jwt: string, id: string): Promise<InvoiceItem[]> {
+  if (!id) return [];
+  try {
+    const res = await fetch(`${QNE_BASE}/api/SalesInvoices/${encodeURIComponent(id)}`, {
+      headers: { Authorization: `Bearer ${jwt}` },
+    });
+    if (!res.ok) return [];
+    const body = (await res.json()) as { data?: Record<string, unknown> };
+    const d = body.data;
+    if (!d) return [];
+    const keys = ["details", "invoiceDetails", "salesInvoiceDetails", "lines", "items"];
+    let arr: Array<Record<string, unknown>> | null = null;
+    for (const k of keys) {
+      const v = d[k];
+      if (Array.isArray(v) && v.length) {
+        arr = v as Array<Record<string, unknown>>;
+        break;
+      }
+    }
+    if (!arr) {
+      for (const v of Object.values(d)) {
+        if (
+          Array.isArray(v) &&
+          v.length &&
+          typeof v[0] === "object" &&
+          v[0] &&
+          ("description" in (v[0] as object) || "stockCode" in (v[0] as object))
+        ) {
+          arr = v as Array<Record<string, unknown>>;
+          break;
+        }
+      }
+    }
+    if (!arr) return [];
+    return arr.map((r) => ({
+      stockCode: String(r.stockCode ?? r.itemCode ?? r.code ?? ""),
+      description: String(r.description ?? r.itemDescription ?? r.desc ?? r.remark ?? ""),
+      qty: Number(r.qty ?? r.quantity ?? 0),
+      uom: String(r.uom ?? r.unit ?? ""),
+      unitPrice: Number(r.unitPrice ?? r.price ?? 0),
+      amount: Number(r.netAmount ?? r.amount ?? r.subTotal ?? r.lineTotal ?? 0),
+    }));
+  } catch {
+    return [];
+  }
+}
+
 export const exchangeApiKey = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => ExchangeSchema.parse(input))
   .handler(async ({ data }): Promise<{ token: string; companyName?: string }> => {
