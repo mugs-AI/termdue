@@ -761,19 +761,27 @@ export const sendOverdueViaWhatsApp = createServerFn({ method: "POST" })
           "This customer has no phone number in QNE. Add a WhatsApp No. or Phone 1 in Customer Maintenance.",
         );
 
-      // 2. Generate PDF statement.
+      // 2. Fetch letterhead + per-invoice items in parallel.
+      const [companyHeaderLines, ...itemsPerInvoice] = await Promise.all([
+        fetchCompanyHeaderLines(data.token),
+        ...data.invoices.map((i) => fetchInvoiceItems(data.token, i.id)),
+      ]);
+
+      // 3. Generate PDF statement.
       const pdfBytes = await buildStatementPdf({
+        companyHeaderLines,
         companyName: data.companyName,
         customerName: data.customerName,
         customerCode: data.customerCode,
         currency: data.currency,
-        invoices: data.invoices.map((i) => ({
+        invoices: data.invoices.map((i, idx) => ({
           docCode: i.docCode,
           refNo: i.refNo,
           docDate: i.docDate,
           dueDate: i.dueDate ?? null,
           outstandingAmount: i.outstandingAmount,
           daysOverdue: i.daysOverdue,
+          items: itemsPerInvoice[idx] ?? [],
         })),
       });
 
