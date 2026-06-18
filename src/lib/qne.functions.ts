@@ -419,7 +419,10 @@ function pickCustomerPhone(record: Record<string, unknown>): string {
   return candidates.sort((a, b) => b.score - a.score)[0]?.value ?? "";
 }
 
-async function fetchCustomerPhone(headers: { Authorization: string }, data: z.infer<typeof WhatsappSchema>) {
+async function fetchCustomerPhone(
+  headers: { Authorization: string },
+  data: z.infer<typeof WhatsappSchema>,
+) {
   const detailRes = await fetch(`${QNE_BASE}/api/Customers/${data.customerId}`, { headers });
   if (detailRes.status === 401) throw new QneUnauthorizedError();
   if (!detailRes.ok) throw new Error(`Unable to load QNE customer (${detailRes.status}).`);
@@ -492,14 +495,8 @@ async function buildStatementPdf(opts: {
 
   const margin = 40;
   let y = height - margin;
-  const draw = (
-    text: string,
-    x: number,
-    yy: number,
-    size = 10,
-    f = font,
-    color = rgb(0, 0, 0),
-  ) => page.drawText(text, { x, y: yy, size, font: f, color });
+  const draw = (text: string, x: number, yy: number, size = 10, f = font, color = rgb(0, 0, 0)) =>
+    page.drawText(text, { x, y: yy, size, font: f, color });
 
   draw(opts.companyName || "Overdue Statement", margin, y, 16, bold);
   y -= 22;
@@ -614,7 +611,10 @@ export const sendOverdueViaWhatsApp = createServerFn({ method: "POST" })
 
       // 3. Upload to Lovable Cloud storage.
       const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-      const safeCode = (data.customerCode || String(data.customerId)).replace(/[^A-Za-z0-9_-]/g, "_");
+      const safeCode = (data.customerCode || String(data.customerId)).replace(
+        /[^A-Za-z0-9_-]/g,
+        "_",
+      );
       const objectPath = `${safeCode}/overdue-${Date.now()}.pdf`;
       const { error: uploadErr } = await supabaseAdmin.storage
         .from("overdue-statements")
