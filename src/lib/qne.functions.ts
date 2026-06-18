@@ -352,8 +352,108 @@ const WhatsappSchema = z.object({
 
 function sanitizePhone(raw: string): string {
   const digits = (raw || "").replace(/[^\d]/g, "");
-  // Strip leading zeros so wa.me gets country-code+number.
-  return digits.replace(/^0+/, "");
+  if (!digits) return "";
+  // QNE Malaysia records may store Phone 1 with a local leading zero.
+  if (digits.startsWith("0")) return `60${digits.replace(/^0+/, "")}`;
+  return digits;
+}
+
+function pickCustomerPhone(record: Record<string, unknown>): string {
+  const normalize = (key: string) => key.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const preferred = new Set([
+    "whatsappno",
+    "whatsappnumber",
+    "whatsapp",
+    "billingwhatsappno",
+    "billingwhatsappnumber",
+    "phone1",
+    "phoneno1",
+    "phoneone",
+    "billingphone1",
+    "billingphoneno1",
+    "mobilephone",
+    "mobileno",
+    "mobilenumber",
+    "mobile",
+    "tel1",
+    "telephone1",
+    "contactno",
+    "contactnumber",
+    "phone",
+    "phoneno",
+    "phone2",
+    "tel2",
+  ]);
+  const candidates: Array<{ score: number; value: string }> = [];
+
+  const visit = (value: unknown, keyPath: string[], depth = 0) => {
+    if (value == null || depth > 6) return;
+    if (typeof value === "object") {
+      if (Array.isArray(value)) {
+        value.forEach((item, index) => visit(item, [...keyPath, String(index)], depth + 1));
+        return;
+      }
+      for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+        visit(child, [...keyPath, key], depth + 1);
+      }
+      return;
+    }
+
+    const raw = String(value).trim();
+    const phone = sanitizePhone(raw);
+    if (phone.length < 8) return;
+
+    const normalizedPath = keyPath.map(normalize);
+    let score = 0;
+    for (const key of normalizedPath) {
+      if (preferred.has(key)) score = Math.max(score, 100);
+      else if (key.includes("whatsapp")) score = Math.max(score, 90);
+      else if (key.includes("phone") || key.includes("tel") || key.includes("mobile")) {
+        score = Math.max(score, 70);
+      }
+    }
+    if (score > 0) candidates.push({ score, value: phone });
+  };
+
+  visit(record, []);
+  return candidates.sort((a, b) => b.score - a.score)[0]?.value ?? "";
+}
+
+async function fetchCustomerPhone(headers: { Authorization: string }, data: z.infer<typeof WhatsappSchema>) {
+  const detailRes = await fetch(`${QNE_BASE}/api/Customers/${data.customerId}`, { headers });
+  if (detailRes.status === 401) throw new QneUnauthorizedError();
+  if (!detailRes.ok) throw new Error(`Unable to load QNE customer (${detailRes.status}).`);
+  const detailBody = (await detailRes.json()) as {
+    code?: string;
+    message?: string;
+    data?: Record<string, unknown>;
+  };
+  if (detailBody.code !== "0000" || !detailBody.data) {
+    throw new Error(detailBody.message || "Customer not found in QNE.");
+  }
+
+  const phoneFromDetail = pickCustomerPhone(detailBody.data);
+  if (phoneFromDetail) return phoneFromDetail;
+
+  const listUrl = new URL(`${QNE_BASE}/api/Customers/List`);
+  listUrl.searchParams.set(
+    "$filter",
+    `id eq ${data.customerId} or code eq '${data.customerCode.replace(/'/g, "''")}'`,
+  );
+  listUrl.searchParams.set("$top", "3");
+  const listRes = await fetch(listUrl, { headers });
+  if (listRes.status === 401) throw new QneUnauthorizedError();
+  if (!listRes.ok) return "";
+  const listBody = (await listRes.json()) as {
+    code?: string;
+    data?: { value?: Array<Record<string, unknown>> };
+  };
+  if (listBody.code !== "0000") return "";
+  for (const customer of listBody.data?.value ?? []) {
+    const phone = pickCustomerPhone(customer);
+    if (phone) return phone;
+  }
+  return "";
 }
 
 async function shortenUrl(longUrl: string): Promise<string> {
@@ -490,41 +590,7 @@ export const sendOverdueViaWhatsApp = createServerFn({ method: "POST" })
       const headers = { Authorization: `Bearer ${data.token}` };
 
       // 1. Fetch customer for phone number.
-      const customerRes = await fetch(`${QNE_BASE}/api/Customers/${data.customerId}`, { headers });
-      if (customerRes.status === 401) throw new QneUnauthorizedError();
-      if (!customerRes.ok)
-        throw new Error(`Unable to load QNE customer (${customerRes.status}).`);
-      const customerBody = (await customerRes.json()) as {
-        code?: string;
-        message?: string;
-        data?: Record<string, unknown>;
-      };
-      if (customerBody.code !== "0000" || !customerBody.data)
-        throw new Error(customerBody.message || "Customer not found in QNE.");
-
-      const c = customerBody.data;
-      // Case-insensitive lookup across possible QNE field names.
-      const pickField = (...names: string[]): string => {
-        const lowerMap: Record<string, unknown> = {};
-        for (const [k, v] of Object.entries(c)) lowerMap[k.toLowerCase()] = v;
-        for (const n of names) {
-          const v = lowerMap[n.toLowerCase()];
-          if (v != null && String(v).trim() !== "") return String(v);
-        }
-        return "";
-      };
-      const rawPhone = pickField(
-        "whatsApp",
-        "whatsAppNo",
-        "whatsapp",
-        "mobilePhone",
-        "mobile",
-        "phone1",
-        "phone",
-        "phoneNo",
-        "phone2",
-      );
-      const phone = sanitizePhone(rawPhone);
+      const phone = await fetchCustomerPhone(headers, data);
       if (!phone)
         throw new Error(
           "This customer has no phone number in QNE. Add a WhatsApp No. or Phone 1 in Customer Maintenance.",
