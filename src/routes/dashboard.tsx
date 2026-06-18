@@ -191,6 +191,7 @@ function DashboardPage() {
         currency: vars.currency,
         companyName: vars.companyName,
         invoices: vars.invoices.map((i) => ({
+          id: i.id,
           docCode: i.docCode,
           refNo: i.refNo,
           docDate: i.docDate,
