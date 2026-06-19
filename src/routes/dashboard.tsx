@@ -980,3 +980,105 @@ function CustomerGroups({
     </div>
   );
 }
+
+function InvoiceRow({
+  inv,
+  currency,
+  token,
+}: {
+  inv: OverdueInvoice;
+  currency: string;
+  token: string;
+}) {
+  const saveFn = useServerFn(updateInvoiceRemarks);
+  const [r1, setR1] = useState(inv.remark1 ?? "");
+  const [r2, setR2] = useState(inv.remark2 ?? "");
+  const [saved, setSaved] = useState<string | null>(null);
+
+  const save = useMutation({
+    mutationFn: async () => {
+      if (!token) throw new Error("Not signed in");
+      return saveFn({ data: { token, invoiceId: inv.id, remark1: r1, remark2: r2 } });
+    },
+    onSuccess: () => {
+      setSaved("Saved");
+      setTimeout(() => setSaved(null), 1800);
+    },
+  });
+
+  const dirty = r1 !== (inv.remark1 ?? "") || r2 !== (inv.remark2 ?? "");
+
+  return (
+    <tr className="border-t border-border hover:bg-accent/30 align-top">
+      <td className="px-5 py-2">
+        <a
+          href={N3_INVOICE_URL(inv.id)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-medium text-primary hover:underline"
+          title="Open in N3"
+        >
+          {inv.docCode} ↗
+        </a>
+      </td>
+      <td className="px-3 py-2 text-foreground">{inv.refNo || "—"}</td>
+      <td className="px-3 py-2 text-muted-foreground">{inv.docDate}</td>
+      <td className="px-3 py-2 text-muted-foreground">{inv.dueDate ?? "—"}</td>
+      <td className="px-3 py-2 text-muted-foreground">{inv.salespersonCode || "—"}</td>
+      <td className="px-3 py-2 text-muted-foreground">{inv.termCode || "—"}</td>
+      <td className="px-3 py-2 text-right tabular-nums">
+        <span
+          className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${
+            inv.daysOverdue > 90
+              ? "bg-red-100 text-red-700"
+              : inv.daysOverdue > 60
+                ? "bg-orange-100 text-orange-700"
+                : inv.daysOverdue > 30
+                  ? "bg-amber-100 text-amber-700"
+                  : "bg-emerald-100 text-emerald-700"
+          }`}
+        >
+          {inv.daysOverdue}d
+        </span>
+      </td>
+      <td className="px-3 py-2 text-right tabular-nums font-medium text-foreground">
+        {fmtMoney(inv.outstandingAmount, inv.currencyCode || currency)}
+      </td>
+      <td className="px-2 py-2">
+        <input
+          type="text"
+          value={r1}
+          onChange={(e) => setR1(e.target.value)}
+          placeholder="Remark 1"
+          maxLength={2000}
+          className="w-40 rounded-md border border-input bg-background px-2 py-1 text-xs"
+        />
+      </td>
+      <td className="px-2 py-2">
+        <input
+          type="text"
+          value={r2}
+          onChange={(e) => setR2(e.target.value)}
+          placeholder="Remark 2"
+          maxLength={2000}
+          className="w-40 rounded-md border border-input bg-background px-2 py-1 text-xs"
+        />
+      </td>
+      <td className="px-2 py-2 whitespace-nowrap">
+        <Button
+          size="sm"
+          variant={dirty ? "default" : "outline"}
+          disabled={!dirty || save.isPending || !token}
+          onClick={() => save.mutate()}
+        >
+          {save.isPending ? "Saving…" : saved ?? "Save"}
+        </Button>
+        {save.isError && (
+          <div className="mt-1 text-[10px] text-destructive max-w-[160px]">
+            {(save.error as Error).message}
+          </div>
+        )}
+      </td>
+    </tr>
+  );
+}
