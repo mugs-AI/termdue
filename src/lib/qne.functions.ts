@@ -47,6 +47,8 @@ export type OverdueInvoice = {
   outstandingAmount: number;
   currencyCode: string;
   daysOverdue: number;
+  remark1: string;
+  remark2: string;
 };
 
 export type OverdueResult = {
@@ -268,6 +270,48 @@ export const toggleCustomerSuspension = createServerFn({ method: "POST" })
     return { status };
   });
 
+const UpdateRemarksSchema = z.object({
+  token: z.string().min(20),
+  invoiceId: z.string().min(1),
+  remark1: z.string().max(2000).optional().default(""),
+  remark2: z.string().max(2000).optional().default(""),
+});
+
+export const updateInvoiceRemarks = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown) => UpdateRemarksSchema.parse(input))
+  .handler(async ({ data }): Promise<{ ok: true; remark1: string; remark2: string }> => {
+    const headers = { Authorization: `Bearer ${data.token}` };
+    const invRes = await fetch(
+      `${QNE_BASE}/api/SalesInvoices/${encodeURIComponent(data.invoiceId)}`,
+      { headers },
+    );
+    if (invRes.status === 401) throw new QneUnauthorizedError();
+    if (!invRes.ok) throw new Error(`Unable to load sales invoice (${invRes.status}).`);
+    const invBody = (await invRes.json()) as {
+      code?: string;
+      message?: string;
+      data?: Record<string, unknown>;
+    };
+    if (invBody.code !== "0000" || !invBody.data) {
+      throw new Error(invBody.message || "Sales invoice not found in QNE.");
+    }
+
+    const merged = { ...invBody.data, remark1: data.remark1, remark2: data.remark2 };
+    const updateRes = await fetch(`${QNE_BASE}/api/SalesInvoices/Update`, {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify(merged),
+    });
+    if (updateRes.status === 401) throw new QneUnauthorizedError();
+    if (!updateRes.ok)
+      throw new Error(`Unable to update sales invoice (${updateRes.status}).`);
+    const updateBody = (await updateRes.json()) as { code?: string; message?: string };
+    if (updateBody.code !== "0000") {
+      throw new Error(updateBody.message || "QNE rejected the remarks update.");
+    }
+    return { ok: true, remark1: data.remark1, remark2: data.remark2 };
+  });
+
 export const fetchOverdueInvoices = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => InputSchema.parse(input))
   .handler(async ({ data }): Promise<OverdueResult> => {
@@ -336,6 +380,8 @@ export const fetchOverdueInvoices = createServerFn({ method: "POST" })
         outstandingAmount: Number(r.outstandingAmount ?? 0),
         currencyCode: String(r.currencyCode ?? ""),
         daysOverdue,
+        remark1: String(r.remark1 ?? r.remarks1 ?? ""),
+        remark2: String(r.remark2 ?? r.remarks2 ?? ""),
       };
     });
 
