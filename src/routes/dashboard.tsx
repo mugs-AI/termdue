@@ -465,6 +465,7 @@ function DashboardPage() {
           }
           onToggleStatus={(customerId) => customerStatusMutation.mutate(customerId)}
           companyName={data?.companyName ?? ""}
+          token={token ?? ""}
           whatsappPendingId={whatsappPendingId}
           whatsappError={
             whatsappMutation.isError ? (whatsappMutation.error as Error).message : null
@@ -803,6 +804,7 @@ function CustomerGroups({
   whatsappPendingId,
   whatsappError,
   onSendWhatsapp,
+  token,
 }: {
   groups: CustomerGroup[];
   expanded: Record<string, boolean>;
@@ -818,6 +820,7 @@ function CustomerGroups({
   whatsappPendingId: number | null;
   whatsappError: string | null;
   onSendWhatsapp: (g: CustomerGroup) => void;
+  token: string;
 }) {
   if (loading) {
     return (
