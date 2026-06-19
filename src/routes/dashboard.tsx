@@ -948,15 +948,12 @@ function CustomerGroups({
                     <thead className="text-muted-foreground">
                       <tr className="text-left">
                         <th className="px-5 py-2 font-medium">Invoice</th>
-                        <th className="px-3 py-2 font-medium">Ref No</th>
-                        <th className="px-3 py-2 font-medium">Invoice date</th>
-                        <th className="px-3 py-2 font-medium">Due date</th>
+                        <th className="px-3 py-2 font-medium whitespace-nowrap">Invoice date</th>
+                        <th className="px-3 py-2 font-medium whitespace-nowrap">Due date</th>
                         <th className="px-3 py-2 font-medium">Salesperson</th>
                         <th className="px-3 py-2 font-medium">Term</th>
                         <th className="px-3 py-2 font-medium text-right">Days</th>
                         <th className="px-3 py-2 font-medium text-right">Outstanding</th>
-                        <th className="px-3 py-2 font-medium">Remark 1</th>
-                        <th className="px-3 py-2 font-medium">Remark 2</th>
                         <th className="px-3 py-2 font-medium"></th>
                       </tr>
                     </thead>
@@ -973,6 +970,7 @@ function CustomerGroups({
                   </table>
                 </div>
               )}
+
             </li>
           );
         })}
