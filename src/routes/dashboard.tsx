@@ -955,48 +955,19 @@ function CustomerGroups({
                         <th className="px-3 py-2 font-medium">Term</th>
                         <th className="px-3 py-2 font-medium text-right">Days</th>
                         <th className="px-3 py-2 font-medium text-right">Outstanding</th>
+                        <th className="px-3 py-2 font-medium">Remark 1</th>
+                        <th className="px-3 py-2 font-medium">Remark 2</th>
+                        <th className="px-3 py-2 font-medium"></th>
                       </tr>
                     </thead>
                     <tbody>
                       {g.invoices.map((inv) => (
-                        <tr key={inv.id} className="border-t border-border hover:bg-accent/30">
-                          <td className="px-5 py-2">
-                            <a
-                              href={N3_INVOICE_URL(inv.id)}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="font-medium text-primary hover:underline"
-                              title="Open in N3"
-                            >
-                              {inv.docCode} ↗
-                            </a>
-                          </td>
-                          <td className="px-3 py-2 text-foreground">{inv.refNo || "—"}</td>
-                          <td className="px-3 py-2 text-muted-foreground">{inv.docDate}</td>
-                          <td className="px-3 py-2 text-muted-foreground">{inv.dueDate ?? "—"}</td>
-                          <td className="px-3 py-2 text-muted-foreground">
-                            {inv.salespersonCode || "—"}
-                          </td>
-                          <td className="px-3 py-2 text-muted-foreground">{inv.termCode || "—"}</td>
-                          <td className="px-3 py-2 text-right tabular-nums">
-                            <span
-                              className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${
-                                inv.daysOverdue > 90
-                                  ? "bg-red-100 text-red-700"
-                                  : inv.daysOverdue > 60
-                                    ? "bg-orange-100 text-orange-700"
-                                    : inv.daysOverdue > 30
-                                      ? "bg-amber-100 text-amber-700"
-                                      : "bg-emerald-100 text-emerald-700"
-                              }`}
-                            >
-                              {inv.daysOverdue}d
-                            </span>
-                          </td>
-                          <td className="px-3 py-2 text-right tabular-nums font-medium text-foreground">
-                            {fmtMoney(inv.outstandingAmount, inv.currencyCode || currency)}
-                          </td>
-                        </tr>
+                        <InvoiceRow
+                          key={inv.id}
+                          inv={inv}
+                          currency={currency}
+                          token={token}
+                        />
                       ))}
                     </tbody>
                   </table>
