@@ -476,7 +476,7 @@ export const getAiInsights = createServerFn({ method: "POST" })
       }),
     });
 
-    });
+
 
     if (!res.ok) {
       const text = await res.text();
