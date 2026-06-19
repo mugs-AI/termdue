@@ -455,7 +455,7 @@ export const getAiInsights = createServerFn({ method: "POST" })
     const apiKey = process.env.LOVABLE_API_KEY;
     if (!apiKey) throw new Error("AI gateway not configured.");
 
-    const prompt = `You are a credit-control analyst. Return EXACTLY 5 ultra-short, actionable tips based on this overdue-AR snapshot. Each tip MUST be a single sentence of at most 15 words. No numbering, no bullets, no preamble — one tip per line.\n\nDATA:\n${JSON.stringify(data.summary)}`;
+    const prompt = `You are a credit-control analyst. Return EXACTLY 5 actionable tips based on this overdue-AR snapshot. Each tip MUST be 1–2 sentences, roughly 20–35 words, specific and practical (mention amounts, ageing buckets, or customer segments when relevant). No numbering, no bullets, no preamble — one tip per line.\n\nDATA:\n${JSON.stringify(data.summary)}`;
 
     const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -469,11 +469,13 @@ export const getAiInsights = createServerFn({ method: "POST" })
           {
             role: "system",
             content:
-              "You produce concise, expert AR collection insights. Always reply with exactly 5 lines, each a short sentence of 15 words or fewer.",
+              "You produce expert AR collection insights. Always reply with exactly 5 lines, each a substantive tip of 20–35 words (1–2 sentences), concrete and actionable.",
           },
           { role: "user", content: prompt },
         ],
       }),
+    });
+
     });
 
     if (!res.ok) {
